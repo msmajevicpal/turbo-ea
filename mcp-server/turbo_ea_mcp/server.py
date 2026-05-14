@@ -762,7 +762,7 @@ def create_app() -> Starlette:
     ]
 
     # Mount the MCP server's ASGI app under /mcp
-    mcp_app = mcp.sse_app()
+    mcp_app = mcp.streamable_http_app()
 
     async def health(request):
         from starlette.responses import JSONResponse

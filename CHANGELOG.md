@@ -12,6 +12,9 @@ First expansion of the MCP server toolset since its creation. The server now exp
 ### Added
 - **18 new MCP tools across five clusters.** GRC: `list_risks`, `get_risk`, `get_risk_metrics`, `get_card_risks`, `list_cve_findings`, `list_compliance_findings`, `get_security_overview`. Governance & Delivery: `list_principles`, `list_adrs`, `get_adr`, `list_soaws`. Reports: `get_portfolio_report`, `get_cost_treemap`, `get_capability_heatmap`, `get_data_quality_report`. Card context: `get_card_stakeholders`, `get_card_comments`, `get_card_documents`. Every tool is a read-only `GET` shim — the user's JWT is passed straight through to the backend so RBAC is enforced server-side without any per-tool permission checks on the MCP side. The Risk Register filters match the existing UI sidebar; a `_compact()` helper drops `None` / empty filters so URLs stay clean. 20 new unit tests in `mcp-server/tests/test_server.py` (mocked `TurboEAClient.get` + path/params assertions) round out the coverage. Tool reference in `docs/admin/mcp.md` (+ 7 locales) refreshed.
 
+### Fixed
+- **MCP HTTP transport now uses Streamable HTTP instead of SSE.** Modern MCP clients (Claude Desktop, the MCP Inspector, etc.) POST JSON-RPC directly to the protocol endpoint URL with an optional SSE upgrade — but the server was wired to `mcp.sse_app()`, the older two-endpoint transport (`GET /sse` for the stream, `POST /messages/?session_id=…` for client messages). A POST to the mount root therefore got a 307 from Starlette and the connector handshake silently failed. Switched to `mcp.streamable_http_app()` so a single endpoint serves both the JSON-RPC POSTs and the optional SSE upgrade, matching what modern MCP connectors expect.
+
 ## [1.11.4] - 2026-05-14
 
 Small quality-of-life addition for the Card Detail page.

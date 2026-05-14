@@ -5,6 +5,18 @@ All notable changes to Turbo EA are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.12.0] - 2026-05-14
+
+The TurboLens CVE scanner has been removed. The Security tab is now Compliance-only, and the on-demand regulation gap analysis remains fully intact.
+
+### Removed
+- **TurboLens CVE scanner, NVD integration, and CVE findings registry.** The `turbolens_cve_findings` table, the NVD REST client (`services/turbolens_nvd.py`), the CVE scan orchestrator (`run_cve_scan`, AI prioritisation pass, risk-matrix aggregator), and every CVE-related API route (`POST /security/cve-scan`, `GET/PATCH /security/findings`, `GET /security/findings/{id}`, `GET /security/export.csv`) are gone. The CVE → Risk promotion path (`POST /risks/promote/cve/{id}` and the supporting `promote_cve_finding` service helper) is also removed; `RiskSourceType` no longer carries `security_cve`. Migration `084_remove_cve_scanner` drops the table, purges promoted CVE-derived risks (and their card joins + owner Todos), and clears `security_cve` analysis-run history. The `NVD_API_KEY` environment variable is no longer read.
+- **CVE UI surface.** The TurboLens Security tab is rebranded to Compliance: the inner CVE sub-tab, the CVE findings table, the clickable 5×5 probability × severity risk matrix, the CVE finding drawer, the "Top critical findings" overview block, and the CSV export button are removed. The Create Risk dialog's CVE-promote branch and the CVE-flavoured i18n keys (severity / priority / probability / status / drawer / patch / matrix labels) are deleted across all 8 locales.
+- **CVE demo seed data.** `seed_demo_security.py` no longer ships the 8 fictitious `CVE-2025-9XXXX` rows; only the 12 compliance findings remain. The `seed_demo.py` sample risk with `source_type: "security_cve"` is removed. The matching test suites (`test_turbolens_nvd`, `test_turbolens_security_cve_scan`) are deleted and `test_turbolens_security` / `test_seed_demo_security` keep only the compliance assertions.
+
+### Changed
+- **Permission descriptions.** `security_compliance.view` / `security_compliance.manage` keys are kept (the compliance scanner still uses them) but their descriptions now reference compliance only. The permission group label is renamed from "Security & Compliance" to "Compliance".
+
 ## [1.11.4] - 2026-05-14
 
 Small quality-of-life addition for the Card Detail page.

@@ -135,6 +135,24 @@ describe("StakeholdersTab", () => {
     ).toBeInTheDocument();
   });
 
+  it("always shows a generic 'Invite a new user' row when no email is typed", async () => {
+    // Discoverability: a user with users.invite should see the affordance
+    // regardless of what they type — including before they type anything.
+    authRef.user = {
+      id: "me",
+      email: "me@test.com",
+      permissions: { "users.invite": true },
+    };
+    render(<StakeholdersTab card={card} onRefresh={() => {}} />);
+    await waitFor(() => expect(api.get).toHaveBeenCalledWith("/users"));
+
+    await openPicker();
+    const userInput = screen.getByLabelText(/^user$/i);
+    await userEvent.click(userInput);
+
+    expect(await screen.findByText(/invite a new user/i)).toBeInTheDocument();
+  });
+
   it("hides the Invite sentinel when the user lacks users.invite", async () => {
     authRef.user = {
       id: "me",

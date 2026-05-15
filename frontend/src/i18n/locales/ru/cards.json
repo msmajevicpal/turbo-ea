@@ -145,6 +145,7 @@
   "stakeholders.userPlaceholder": "Поиск по имени или email",
   "stakeholders.noneAssigned": "{{role}} не назначен",
   "stakeholders.inviteOption": "Пригласить «{{email}}» как нового пользователя",
+  "stakeholders.inviteNewUser": "Пригласить нового пользователя…",
   "stakeholders.inviteFormTitle": "Пригласить нового пользователя",
   "stakeholders.inviteDisplayName": "Отображаемое имя",
   "stakeholders.inviteEmail": "Email",

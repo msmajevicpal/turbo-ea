@@ -145,6 +145,7 @@
   "stakeholders.userPlaceholder": "Cerca per nome o e-mail",
   "stakeholders.noneAssigned": "Nessun {{role}} assegnato",
   "stakeholders.inviteOption": "Invita «{{email}}» come nuovo utente",
+  "stakeholders.inviteNewUser": "Invita un nuovo utente…",
   "stakeholders.inviteFormTitle": "Invita nuovo utente",
   "stakeholders.inviteDisplayName": "Nome visualizzato",
   "stakeholders.inviteEmail": "E-mail",

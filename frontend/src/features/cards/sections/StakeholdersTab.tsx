@@ -49,8 +49,11 @@ function StakeholdersTab({
   const [addUser, setAddUser] = useState<UserOption | null>(null);
   const [userQuery, setUserQuery] = useState("");
 
-  // Inline invite-new-user form (revealed when the user picks the "Invite ..." row)
-  const [inviteEmail, setInviteEmail] = useState<string | null>(null);
+  // Inline invite-new-user form (revealed when the user picks the "Invite ..." row).
+  // ``inviteMode`` is the visibility flag; ``inviteEmail`` is the field value
+  // (which may legitimately be empty while the user is still typing).
+  const [inviteMode, setInviteMode] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState("");
   const [inviteDisplayName, setInviteDisplayName] = useState("");
   const [inviteSendEmail, setInviteSendEmail] = useState(false);
   const [inviteSubmitting, setInviteSubmitting] = useState(false);
@@ -82,7 +85,8 @@ function StakeholdersTab({
     setAddRole(null);
     setAddUser(null);
     setUserQuery("");
-    setInviteEmail(null);
+    setInviteMode(false);
+    setInviteEmail("");
     setInviteDisplayName("");
     setInviteSendEmail(false);
     setInviteFeedback(null);
@@ -120,7 +124,7 @@ function StakeholdersTab({
   };
 
   const handleInviteAndAdd = async () => {
-    if (!addRole || !inviteEmail || !inviteDisplayName.trim()) return;
+    if (!addRole || !EMAIL_RE.test(inviteEmail) || !inviteDisplayName.trim()) return;
     setInviteSubmitting(true);
     setInviteFeedback(null);
     try {
@@ -244,7 +248,8 @@ function StakeholdersTab({
                   // (since "already assigned" filtering is role-scoped) and the
                   // invite-in-progress form.
                   setAddUser(null);
-                  setInviteEmail(null);
+                  setInviteMode(false);
+                  setInviteEmail("");
                   setInviteFeedback(null);
                 }}
                 getOptionLabel={(o) => rl(o.label, o.translations?.label)}
@@ -269,13 +274,14 @@ function StakeholdersTab({
                   }
                   if (next.kind === "invite") {
                     setAddUser(null);
+                    setInviteMode(true);
                     setInviteEmail(next.email);
                     setInviteDisplayName("");
                     setInviteSendEmail(false);
                     setInviteFeedback(null);
                   } else {
                     setAddUser(next);
-                    setInviteEmail(null);
+                    setInviteMode(false);
                   }
                 }}
                 getOptionLabel={(o) => (o.kind === "user" ? o.user.display_name : "")}
@@ -293,22 +299,25 @@ function StakeholdersTab({
                         );
                       })
                     : opts;
-                  // Surface an "Invite this email" sentinel when the query is a
-                  // valid-looking email, no existing user matches it exactly, and
-                  // the current user holds the users.invite permission.
+                  // Always surface an "Invite a new user…" row at the bottom of
+                  // the dropdown for accounts that can invite — discoverability
+                  // matters more than purity. If the typed text already looks
+                  // like an email, prefill it so one click skips straight to
+                  // the form. If an existing user has that exact email, skip
+                  // the sentinel (it'd just be a duplicate row).
                   if (
                     canInvite &&
-                    EMAIL_RE.test(q) &&
                     !opts.some((o) => o.kind === "user" && o.user.email.toLowerCase() === q)
                   ) {
-                    return [...matches, { kind: "invite", email: q } as InviteOption];
+                    const prefill = EMAIL_RE.test(q) ? q : "";
+                    return [...matches, { kind: "invite", email: prefill } as InviteOption];
                   }
                   return matches;
                 }}
                 renderOption={(props, option) => {
                   if (option.kind === "invite") {
                     return (
-                      <li {...props} key={`invite:${option.email}`}>
+                      <li {...props} key="invite-new-user">
                         <Box
                           sx={{
                             display: "flex",
@@ -319,7 +328,9 @@ function StakeholdersTab({
                         >
                           <MaterialSymbol icon="person_add" size={18} />
                           <Typography variant="body2">
-                            {t("stakeholders.inviteOption", { email: option.email })}
+                            {option.email
+                              ? t("stakeholders.inviteOption", { email: option.email })
+                              : t("stakeholders.inviteNewUser")}
                           </Typography>
                         </Box>
                       </li>
@@ -349,7 +360,7 @@ function StakeholdersTab({
             </Box>
 
             {/* Invite-new-user inline form, revealed when the user picks "Invite ..." */}
-            {inviteEmail && (
+            {inviteMode && (
               <Box
                 sx={{
                   mt: 2,
@@ -404,7 +415,7 @@ function StakeholdersTab({
             )}
 
             <Box sx={{ display: "flex", gap: 1, mt: 2 }}>
-              {inviteEmail ? (
+              {inviteMode ? (
                 <Button
                   size="small"
                   variant="contained"

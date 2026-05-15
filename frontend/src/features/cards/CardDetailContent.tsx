@@ -14,6 +14,7 @@ import { useMetamodel } from "@/hooks/useMetamodel";
 import { useCalculatedFields } from "@/hooks/useCalculatedFields";
 import { useCurrency } from "@/hooks/useCurrency";
 import { usePpmEnabled } from "@/hooks/usePpmEnabled";
+import { useGrcEnabled } from "@/hooks/useGrcEnabled";
 import { api } from "@/api/client";
 import {
   DescriptionSection,
@@ -81,9 +82,11 @@ export default function CardDetailContent({
   const { isCalculated } = useCalculatedFields();
   const { fmt: currencyFmt } = useCurrency();
   const { ppmEnabled } = usePpmEnabled();
+  const { grcEnabled } = useGrcEnabled();
   const { user } = useAuthContext();
   const { can } = usePermissions(user);
-  const showComplianceTab = can("security_compliance.view");
+  const showRisksTab = grcEnabled;
+  const showComplianceTab = grcEnabled && can("security_compliance.view");
 
   const [tab, setTab] = useState(initialTab);
   const [relRefresh, setRelRefresh] = useState(0);
@@ -318,10 +321,11 @@ export default function CardDetailContent({
   const todosIdx = 2 + extraOffset;
   const stakeholdersIdx = 3 + extraOffset;
   const resourcesIdx = 4 + extraOffset;
-  const risksIdx = 5 + extraOffset;
+  const risksTabOffset = showRisksTab ? 1 : 0;
+  const risksIdx = showRisksTab ? 5 + extraOffset : -1;
   const complianceTabOffset = showComplianceTab ? 1 : 0;
-  const complianceIdx = showComplianceTab ? 6 + extraOffset : -1;
-  const historyIdx = 6 + extraOffset + complianceTabOffset;
+  const complianceIdx = showComplianceTab ? 5 + extraOffset + risksTabOffset : -1;
+  const historyIdx = 5 + extraOffset + risksTabOffset + complianceTabOffset;
   const ppmTabIdx = isPpm ? historyIdx + 1 : -1;
   // SoAW tab index = 1 when Initiative (no BPM); slots in right after Card.
   const soawTabIdx = isSoaw ? 1 + bpmOffset : -1;
@@ -352,7 +356,7 @@ export default function CardDetailContent({
         <Tab label={t("tabs.todos")} />
         <Tab label={t("tabs.stakeholders")} />
         <Tab label={t("tabs.resources")} />
-        <Tab label={t("tabs.risks")} />
+        {showRisksTab && <Tab label={t("tabs.risks")} />}
         {showComplianceTab && <Tab label={t("tabs.compliance")} />}
         <Tab label={t("tabs.history")} />
         {isPpm && <Tab label={t("tabs.ppm")} />}
@@ -452,7 +456,7 @@ export default function CardDetailContent({
           </MuiCard>
         </ErrorBoundary>
       )}
-      {tab === risksIdx && (
+      {showRisksTab && tab === risksIdx && (
         <ErrorBoundary label="Risks">
           <MuiCard>
             <CardContent>

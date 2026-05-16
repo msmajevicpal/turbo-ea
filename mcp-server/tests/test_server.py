@@ -254,22 +254,6 @@ class TestGrcTools:
         _assert_called_with(mock, "/cards/c-1/risks")
 
     @pytest.mark.asyncio
-    async def test_list_cve_findings(self, fake_token):
-        patcher, mock = _patched_get({"items": []})
-        with patcher:
-            await server.list_cve_findings(severity="critical", status="open")
-        _assert_called_with(
-            mock,
-            "/turbolens/security/findings",
-            params={
-                "severity": "critical",
-                "status": "open",
-                "page": 1,
-                "page_size": 50,
-            },
-        )
-
-    @pytest.mark.asyncio
     async def test_list_compliance_findings(self, fake_token):
         patcher, mock = _patched_get([])
         with patcher:

@@ -250,7 +250,7 @@ async def list_risks(
             'low', 'medium', 'high', 'critical'.
         owner_id: Filter to risks owned by a specific user UUID.
         card_id: Filter to risks linked to a specific card UUID.
-        source_type: How the risk was raised — 'manual', 'security_cve',
+        source_type: How the risk was raised — 'manual',
             'security_compliance'.
         search: Free-text search across title, description and reference.
         overdue: When true, only return risks past their target resolution
@@ -325,51 +325,7 @@ async def get_card_risks(card_id: str) -> str:
     return _fmt(data)
 
 
-# ── GRC — Security & Compliance findings ───────────────────────────────────
-
-
-@mcp.tool()
-async def list_cve_findings(
-    severity: str = "",
-    probability: str = "",
-    status: str = "",
-    card_id: str = "",
-    card_type: str = "",
-    page: int = 1,
-    page_size: int = 50,
-) -> str:
-    """Paginated CVE findings from the TurboLens Security & Compliance scan.
-
-    Args:
-        severity: 'critical', 'high', 'medium', 'low'.
-        probability: AI-rated exploitation likelihood — 'very_high', 'high',
-            'medium', 'low', 'very_low'.
-        status: Lifecycle state — 'open', 'acknowledged', 'in_progress',
-            'mitigated', 'accepted'.
-        card_id: Filter to a single affected card UUID.
-        card_type: 'Application' or 'ITComponent'.
-        page: Page number (default 1).
-        page_size: Results per page (default 50, max 200).
-    """
-    token = await _get_current_token()
-    if not token:
-        return "Error: Not authenticated. Please reconnect."
-    client = TurboEAClient(token)
-    data = await client.get(
-        "/turbolens/security/findings",
-        params=_compact(
-            {
-                "severity": severity,
-                "probability": probability,
-                "status": status,
-                "card_id": card_id,
-                "card_type": card_type,
-                "page": page,
-                "page_size": min(page_size, 200),
-            }
-        ),
-    )
-    return _fmt(data)
+# ── GRC — Compliance findings ──────────────────────────────────────────────
 
 
 @mcp.tool()
@@ -407,8 +363,8 @@ async def list_compliance_findings(
 
 @mcp.tool()
 async def get_security_overview() -> str:
-    """KPIs + risk matrix + top critical findings for the Security &
-    Compliance dashboard (CVE side + compliance side)."""
+    """Compliance scores + per-regulation status matrix for the Compliance
+    dashboard, plus metadata about the last completed scan."""
     token = await _get_current_token()
     if not token:
         return "Error: Not authenticated. Please reconnect."

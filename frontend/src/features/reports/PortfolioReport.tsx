@@ -374,12 +374,14 @@ function GroupCard({
   selectFields,
   onGroupClick,
   onAppClick,
+  countLabel,
 }: {
   group: GroupData;
   colorBy: string;
   selectFields: FieldDef[];
   onGroupClick: (g: GroupData) => void;
   onAppClick: (id: string) => void;
+  countLabel: (count: number) => string;
 }) {
   const { t } = useTranslation(["reports"]);
   const count = group.apps.length;
@@ -442,7 +444,7 @@ function GroupCard({
         </Typography>
         <Chip
           size="small"
-          label={t("portfolio.apps", { count })}
+          label={countLabel(count)}
           sx={{
             height: 22,
             fontSize: "0.72rem",
@@ -999,6 +1001,17 @@ export default function PortfolioReport({
       : cardType === "Application"
         ? t("portfolio.title")
         : t("flexiblePortfolio.titleFor", { type: typeLabel });
+
+  // Group/ungrouped count chip — "{n} apps" for the legacy Application
+  // Portfolio (preserves wording); "{n} {typeLabel}" once the user picks
+  // a different type so the pill matches the cards on screen.
+  const countLabel = useCallback(
+    (n: number) =>
+      cardType === "Application"
+        ? t("portfolio.apps", { count: n })
+        : `${n} ${typeLabel}`,
+    [cardType, typeLabel, t],
+  );
 
   const printParams = useMemo(() => {
     const params: { label: string; value: string }[] = [];
@@ -1560,6 +1573,7 @@ export default function PortfolioReport({
                       selectFields={selectFields}
                       onGroupClick={handleGroupClick}
                       onAppClick={handleAppClick}
+                      countLabel={countLabel}
                     />
                   </Box>
                 ))}
@@ -1607,7 +1621,7 @@ export default function PortfolioReport({
                     </Typography>
                     <Chip
                       size="small"
-                      label={t("portfolio.apps", { count: ungrouped.length })}
+                      label={countLabel(ungrouped.length)}
                       sx={{
                         height: 22,
                         fontSize: "0.72rem",

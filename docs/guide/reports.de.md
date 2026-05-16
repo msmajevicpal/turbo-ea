@@ -21,6 +21,12 @@ Dies ist ideal für Portfolioanalysen — zum Beispiel Anwendungen nach Geschäf
 
 Wenn KI konfiguriert und Portfolio-Erkenntnisse von einem Administrator aktiviert sind, zeigt der Portfoliobericht eine Schaltfläche **KI-Erkenntnisse**. Ein Klick sendet eine Zusammenfassung der aktuellen Ansicht an den KI-Anbieter, der strategische Erkenntnisse über Konzentrationsrisiken, Modernisierungsmöglichkeiten, Lebenszyklus-Bedenken und Portfolio-Ausgewogenheit liefert. Das Erkenntnispanel ist zusammenklappbar und kann nach Änderung von Filtern oder Gruppierung neu generiert werden.
 
+## Flexibles Portfolio
+
+Das **Flexible Portfolio** verwendet dieselben Bedienelemente wie das Anwendungsportfolio, ergänzt um einen **Kartentyp**-Auswähler oben in der Symbolleiste. Damit lassen sich Portfolios aus Geschäftsfähigkeiten, Initiativen, IT-Komponenten oder jedem anderen sichtbaren Kartentyp mit derselben Gruppierungs-, Färbungs- und Filterlogik analysieren.
+
+Beim Wechsel des Kartentyps werden die Auswahl für Gruppierung, Färbung und Filter zurückgesetzt (sie verweisen auf Feldschlüssel, die im neuen Typ nicht existieren), und der Bericht wird mit den Feldern, Beziehungen und Tags des gewählten Typs neu geladen. Der Bericht nutzt dieselbe Berechtigung wie das Anwendungsportfolio (`reports.portfolio`) und wird unabhängig davon gespeichert.
+
 ## Fähigkeitskarte
 
 ![Geschäftsfähigkeitskarte](../assets/img/de/11_faehigkeiten_karte.png)

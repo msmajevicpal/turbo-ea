@@ -21,6 +21,12 @@ Questo è ideale per l'analisi del portfolio — ad esempio, posizionare le appl
 
 Quando l'IA è configurata e le analisi del portafoglio sono abilitate da un amministratore, il report del portafoglio mostra un pulsante **Analisi IA**. Cliccandolo viene inviato un riepilogo della vista corrente al provider IA, che restituisce analisi strategiche su rischi di concentrazione, opportunità di modernizzazione, problematiche del ciclo di vita e bilanciamento del portafoglio. Il pannello delle analisi è comprimibile e può essere rigenerato dopo aver modificato filtri o raggruppamenti.
 
+## Portfolio flessibile
+
+Il **Portfolio flessibile** utilizza gli stessi controlli del Portfolio applicazioni ma aggiunge un selettore **Tipo di scheda** in cima alla barra degli strumenti. Permette di analizzare portafogli di Capability di business, Iniziative, Componenti IT o qualsiasi altro tipo di scheda visibile con la stessa esperienza di raggruppamento, colorazione e filtri.
+
+Cambiare il tipo di scheda azzera le selezioni di raggruppamento, colore e filtri (referenziano chiavi di campo che non esistono nel nuovo tipo) e il report viene ricaricato con i campi, le relazioni e i tag applicabili al tipo scelto. Il report condivide lo stesso permesso del Portfolio applicazioni (`reports.portfolio`) e viene salvato in modo indipendente.
+
 ## Mappa delle Capability
 
 ![Mappa delle Business Capability](../assets/img/it/11_mappa_capacita.png)

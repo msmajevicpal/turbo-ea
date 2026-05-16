@@ -21,6 +21,12 @@ This is ideal for portfolio analysis — plotting applications by business value
 
 When AI is configured and portfolio insights are enabled by an admin, the portfolio report shows an **AI Insights** button. Clicking it sends a summary of your current view to the AI provider, which returns strategic insights about concentration risks, modernisation opportunities, lifecycle concerns, and portfolio balance. The insights panel is collapsible and can be regenerated after changing filters or grouping.
 
+## Flexible Portfolio
+
+The **Flexible Portfolio** uses the same controls as the Application Portfolio but adds a **Card type** picker at the top of the toolbar. Use it to analyse a portfolio of Business Capabilities, Initiatives, IT Components, or any other visible card type with the same grouping, colouring, and filter experience.
+
+Switching the card type clears the group-by, colour-by, and filter selections (they reference field keys that don't exist on the new type) and the report re-loads with the fields, relations, and tags applicable to the chosen type. The report shares the same permission as the Application Portfolio (`reports.portfolio`) and saves independently of it.
+
 ## Capability Map
 
 ![Business Capability Map](../assets/img/en/11_capability_map.png)

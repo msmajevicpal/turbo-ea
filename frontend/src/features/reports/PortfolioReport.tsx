@@ -536,6 +536,10 @@ export default function PortfolioReport({
   // Data
   const [cardType, setCardType] = useState<string>(initialCardType);
   const [data, setData] = useState<ApiResponse | null>(null);
+  // Tracks the card type that the currently-loaded `data` belongs to. Used to
+  // gate the defaults- and persist-effects so they don't fire while data is
+  // stale (between picking a new type and the fresh fetch resolving).
+  const [dataCardType, setDataCardType] = useState<string | null>(null);
   const [drawer, setDrawer] = useState<DrawerData | null>(null);
   const [sidePanelCardId, setSidePanelCardId] = useState<string | null>(null);
   const [view, setView] = useState<"chart" | "table">("chart");
@@ -601,15 +605,19 @@ export default function PortfolioReport({
   // Auto-persist config to localStorage. Skip the very first run so that on
   // mount we don't overwrite a previously-saved config with the initial
   // defaults (the consume-config effect runs alongside this one but its state
-  // updates have not yet flushed when this closure is first invoked).
+  // updates have not yet flushed when this closure is first invoked). Also
+  // skip while data is stale (between switching card types and the new fetch
+  // resolving) — otherwise we'd persist transient empty groupByRaw/colorBy
+  // that would prevent defaults from re-applying on the next load.
   const skipFirstPersistRef = useRef(true);
   useEffect(() => {
     if (skipFirstPersistRef.current) {
       skipFirstPersistRef.current = false;
       return;
     }
+    if (dataCardType !== cardType) return;
     saved.persistConfig(getConfig());
-  }, [cardType, view, groupByRaw, colorBy, search, attrFilters, relationFilters, tagFilterIds, tl.timelineDate, sortK, sortD]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [cardType, dataCardType, view, groupByRaw, colorBy, search, attrFilters, relationFilters, tagFilterIds, tl.timelineDate, sortK, sortD]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Reset all parameters to defaults
   const handleReset = useCallback(() => {
@@ -631,12 +639,22 @@ export default function PortfolioReport({
 
   // Fetch data — refetches whenever the user picks a different card type.
   useEffect(() => {
+    let cancelled = false;
+    const fetchedFor = cardType;
     setData(null);
+    setDataCardType(null);
     setAiInsights(null);
     setAiOpen(false);
     api
       .get<ApiResponse>(`/reports/app-portfolio?type=${encodeURIComponent(cardType)}`)
-      .then((r) => setData(r));
+      .then((r) => {
+        if (cancelled) return;
+        setData(r);
+        setDataCardType(fetchedFor);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [cardType]);
 
   // Switching card types invalidates field/relation/tag selections because
@@ -692,9 +710,11 @@ export default function PortfolioReport({
     return opts;
   }, [data, selectFields, metamodelTypes]);
 
-  // Apply defaults once data is available
+  // Apply defaults once data is available. Skip when `data` is stale (loaded
+  // for a previous card type) — otherwise we'd pick options from the old
+  // type's schema right after the user switches types.
   useEffect(() => {
-    if (!data || defaultsApplied) return;
+    if (!data || dataCardType !== cardType || defaultsApplied) return;
     // Set defaults from first available options
     if (!groupByRaw && groupByOptions.length > 0) {
       setGroupByRaw(groupByOptions[0].key);
@@ -703,7 +723,7 @@ export default function PortfolioReport({
       setColorBy(selectFields[0].key);
     }
     setDefaultsApplied(true);
-  }, [data, groupByOptions, selectFields, defaultsApplied]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [data, dataCardType, cardType, groupByOptions, selectFields, defaultsApplied]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Ensure groupByRaw has a valid default
   const groupByKey = useMemo(() => {

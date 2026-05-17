@@ -448,18 +448,19 @@ class TestMyWorkspaceReport:
         assert body["attention_count"] == 2
         assert body["created_count"] == 2
 
-    async def test_open_todo_count_includes_created_todos(self, client, db):
-        """``open_todo_count`` must match the list rendered just below it
-        on the workspace tab — which is ``GET /todos?status=open``, scoped
-        to todos assigned to OR created by the user.
+    async def test_open_todo_count_assigned_only(self, client, db):
+        """``open_todo_count`` is scoped to todos *assigned* to the user.
+        Todos the user merely created (but assigned to someone else) live
+        in the "Created by me" tab on ``/todos`` and must not inflate the
+        workspace counter.
         """
         await create_role(db, key="member", permissions=MEMBER_PERMISSIONS)
         alice = await create_user(db, email="alice@test.com", role="member")
         bob = await create_user(db, email="bob@test.com", role="member")
 
-        # Open, assigned to alice.
+        # Open, assigned to alice — counts.
         db.add(Todo(description="assigned-open", status="open", assigned_to=alice.id))
-        # Open, created by alice but assigned to bob — still counts.
+        # Open, created by alice but assigned to bob — does NOT count.
         db.add(
             Todo(
                 description="created-for-bob",
@@ -468,24 +469,13 @@ class TestMyWorkspaceReport:
                 created_by=alice.id,
             )
         )
-        # Open, both assigned AND created by alice — must not double-count.
-        db.add(
-            Todo(
-                description="self-assigned",
-                status="open",
-                assigned_to=alice.id,
-                created_by=alice.id,
-            )
-        )
-        # Done — must not count.
+        # Done, assigned to alice — does NOT count (wrong status).
         db.add(Todo(description="done", status="done", assigned_to=alice.id))
-        # Bob's — must not count.
-        db.add(Todo(description="bobs", status="open", assigned_to=bob.id))
         await db.flush()
 
         resp = await client.get("/api/v1/reports/my-workspace", headers=auth_headers(alice))
         assert resp.status_code == 200
-        assert resp.json()["open_todo_count"] == 3
+        assert resp.json()["open_todo_count"] == 1
 
     async def test_broken_card_count_includes_created_cards(self, client, db):
         """A user is "responsible for" cards they created, not just cards

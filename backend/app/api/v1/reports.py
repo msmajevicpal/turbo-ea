@@ -211,15 +211,13 @@ async def my_workspace_summary(
         )
     ).scalar() or 0
 
-    # Open todos that count as "mine": same definition as GET /todos?mine=true —
-    # todos either assigned to the calling user, or created by them. Anything
-    # narrower causes the workspace counter to disagree with the list rendered
-    # right under it.
-    my_todo_clause = or_(Todo.assigned_to == user.id, Todo.created_by == user.id)
+    # Open todos assigned to the user. The "Created by me" view lives in
+    # its own tab on /todos — surface only assigned items here so the
+    # counter matches the My Open Todos preview rendered just below it.
     open_todo_count = (
         await db.execute(
             select(func.count(Todo.id)).where(
-                my_todo_clause,
+                Todo.assigned_to == user.id,
                 Todo.status == "open",
             )
         )
@@ -241,7 +239,7 @@ async def my_workspace_summary(
     overdue_todo_count = (
         await db.execute(
             select(func.count(Todo.id)).where(
-                my_todo_clause,
+                Todo.assigned_to == user.id,
                 Todo.status == "open",
                 Todo.due_date.is_not(None),
                 Todo.due_date < today,

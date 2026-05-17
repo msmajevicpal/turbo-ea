@@ -49,7 +49,12 @@ function TodosPanel() {
   const [tab, setTab] = useState(0);
 
   useEffect(() => {
-    const params = tab === 0 ? "?status=open" : tab === 1 ? "?status=done" : "";
+    // Tab order: Open · Done · All (all 3 scoped to "assigned to me") · Created by me
+    let params = "";
+    if (tab === 0) params = "?status=open&assigned_only=true";
+    else if (tab === 1) params = "?status=done&assigned_only=true";
+    else if (tab === 2) params = "?assigned_only=true";
+    else if (tab === 3) params = "?created_only=true";
     api.get<Todo[]>(`/todos${params}`).then(setTodos);
   }, [tab]);
 
@@ -79,6 +84,7 @@ function TodosPanel() {
         <Tab label={t("todos.tabs.open")} />
         <Tab label={t("todos.tabs.done")} />
         <Tab label={t("todos.tabs.all")} />
+        <Tab label={t("todos.tabs.createdByMe")} />
       </Tabs>
 
       <List>

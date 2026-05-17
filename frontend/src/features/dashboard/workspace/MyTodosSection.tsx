@@ -34,7 +34,7 @@ export default function MyTodosSection() {
 
   useEffect(() => {
     api
-      .get<TodoRow[]>("/todos?status=open")
+      .get<TodoRow[]>("/todos?status=open&assigned_only=true")
       .then((rows) => setTodos(rows.slice(0, MAX_VISIBLE)))
       .finally(() => setLoading(false));
   }, []);

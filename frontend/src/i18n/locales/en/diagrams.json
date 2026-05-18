@@ -149,6 +149,7 @@
 
   "cardSidebar.search": "Search...",
   "cardSidebar.insertTooltip": "Click to insert \"{{name}}\" into diagram",
+  "cardSidebar.loadingMore": "Loading more ({{loaded}} of {{total}})...",
 
   "cardPicker.title": "Insert Card",
   "cardPicker.search": "Search cards...",
@@ -162,6 +163,8 @@
   "insertDialog.empty": "No cards match those filters.",
   "insertDialog.resultsCount_one": "{{count}} result",
   "insertDialog.resultsCount_other": "{{count}} results",
+  "insertDialog.showingOf": "Showing {{loaded}} of {{total}}",
+  "insertDialog.loadingMore": "Loading more...",
   "insertDialog.selectedCount_one": "{{count}} selected",
   "insertDialog.selectedCount_other": "{{count}} selected",
   "insertDialog.insertSelected_one": "Insert selected ({{count}})",

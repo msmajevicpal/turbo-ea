@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
@@ -10,10 +10,12 @@ import Collapse from "@mui/material/Collapse";
 import Chip from "@mui/material/Chip";
 import InputAdornment from "@mui/material/InputAdornment";
 import Tooltip from "@mui/material/Tooltip";
+import CircularProgress from "@mui/material/CircularProgress";
 import MaterialSymbol from "@/components/MaterialSymbol";
 import { useResolveMetaLabel } from "@/hooks/useResolveLabel";
 import { api } from "@/api/client";
-import type { CardType, Card, CardListResponse } from "@/types";
+import type { CardType, Card } from "@/types";
+import { useCardSearch } from "./useCardSearch";
 
 interface Props {
   onInsert: (card: Card, cardTypeKey: CardType) => void;
@@ -23,10 +25,8 @@ export default function CardSidebar({ onInsert }: Props) {
   const { t } = useTranslation(["diagrams", "common"]);
   const rml = useResolveMetaLabel();
   const [types, setTypes] = useState<CardType[]>([]);
-  const [cards, setCards] = useState<Card[]>([]);
   const [search, setSearch] = useState("");
   const [expandedType, setExpandedType] = useState<string | null>(null);
-  const [loadingType, setLoadingType] = useState<string | null>(null);
 
   // Load card types on mount
   useEffect(() => {
@@ -35,24 +35,41 @@ export default function CardSidebar({ onInsert }: Props) {
       .then((t) => setTypes(t.filter((x) => !x.is_hidden)));
   }, []);
 
-  // Load cards when a type group is expanded or search changes
+  const searchTrimmed = search.trim();
+  const searchEnabled = expandedType !== null || searchTrimmed.length > 0;
+  const typeKeys = useMemo(
+    () => (expandedType && !searchTrimmed ? [expandedType] : []),
+    [expandedType, searchTrimmed],
+  );
+
+  const {
+    items: cards,
+    total,
+    loading,
+    hasMore,
+    loadMore,
+  } = useCardSearch({
+    types: typeKeys,
+    search: searchTrimmed,
+    enabled: searchEnabled,
+  });
+
+  // Infinite scroll: trigger loadMore when the sentinel near the bottom is visible.
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
-    const params = new URLSearchParams({ page_size: "200" });
-    if (expandedType) params.set("type", expandedType);
-    if (search.trim()) params.set("search", search.trim());
-
-    // Only fetch when there's an expanded type or a search query
-    if (!expandedType && !search.trim()) {
-      setCards([]);
-      return;
-    }
-
-    setLoadingType(expandedType);
-    api
-      .get<CardListResponse>(`/cards?${params}`)
-      .then((r) => setCards(r.items))
-      .finally(() => setLoadingType(null));
-  }, [expandedType, search]);
+    const sentinel = sentinelRef.current;
+    const root = scrollContainerRef.current;
+    if (!sentinel || !root || !hasMore) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) loadMore();
+      },
+      { root, rootMargin: "200px" },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasMore, loadMore, cards.length]);
 
   // Group cards by type (when searching across all types)
   const grouped = useMemo(() => {
@@ -111,7 +128,7 @@ export default function CardSidebar({ onInsert }: Props) {
       </Box>
 
       {/* Type groups */}
-      <Box sx={{ flex: 1, overflow: "auto" }}>
+      <Box ref={scrollContainerRef} sx={{ flex: 1, overflow: "auto" }}>
         <List dense disablePadding>
           {visibleTypes.map((ct) => {
             const isExpanded = isSearchMode
@@ -147,7 +164,7 @@ export default function CardSidebar({ onInsert }: Props) {
 
                 {/* Card items */}
                 <Collapse in={isExpanded} unmountOnExit>
-                  {loadingType === ct.key && items.length === 0 ? (
+                  {loading && items.length === 0 ? (
                     <Typography
                       variant="caption"
                       color="text.secondary"
@@ -202,6 +219,24 @@ export default function CardSidebar({ onInsert }: Props) {
           >
             {t("common:labels.noResults")}
           </Typography>
+        )}
+        {hasMore && (
+          <Box
+            ref={sentinelRef}
+            sx={{
+              display: "flex",
+              justifyContent: "center",
+              alignItems: "center",
+              gap: 1,
+              py: 1.5,
+              color: "text.secondary",
+            }}
+          >
+            <CircularProgress size={14} />
+            <Typography variant="caption">
+              {t("cardSidebar.loadingMore", { loaded: cards.length, total })}
+            </Typography>
+          </Box>
         )}
       </Box>
     </Box>

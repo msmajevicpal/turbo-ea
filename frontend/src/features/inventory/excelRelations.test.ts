@@ -8,7 +8,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as XLSX from "xlsx";
 
-import type { Card, CardType, Relation, RelationType } from "@/types";
+import type {
+  Card,
+  CardType,
+  FieldDef,
+  Relation,
+  RelationType,
+  SectionDef,
+} from "@/types";
 
 import {
   buildExportWorkbook,
@@ -739,5 +746,102 @@ describe("buildExportWorkbook", () => {
     expect(upserts).toHaveLength(1);
     expect(upserts[0].targetRef).toEqual({ kind: "id", id: itc2.id });
     expect(deletes).toHaveLength(0);
+  });
+
+  it("round-trip pin: re-import of unchanged workbook = 0 ops, 0 read-only warnings", async () => {
+    // The whole point of the multi-sheet format is round-trip fidelity.
+    // A re-import of an unchanged export must produce zero relation ops
+    // *and* zero read-only-field warnings — otherwise the preview
+    // becomes scary noise for users who're just trying to apply a small
+    // edit. Regression-pinned against:
+    //   - source-card lookup ignoring valid UUIDs when the grid is filtered
+    //   - read-only fields firing one warning per (row, calc-field)
+    const app: Card = makeCard({
+      id: "11111111-1111-1111-1111-111111111111",
+      type: "Application",
+      name: "ERP",
+      // Calculated/read-only field populated on the existing card — the
+      // exporter writes it out, the importer must accept it silently on
+      // round-trip.
+      attributes: { dqIndex: 87 } as Record<string, unknown>,
+    });
+    const itc1: Card = makeCard({
+      id: "22222222-2222-2222-2222-222222222222",
+      type: "ITComponent",
+      name: "DB",
+    });
+    const itc2: Card = makeCard({
+      id: "33333333-3333-3333-3333-333333333333",
+      type: "ITComponent",
+      name: "Cache",
+    });
+    // Application type carries a read-only calculated field — exactly
+    // what produced ~130 per-row warnings on a real demo dataset.
+    const APP_TYPE_WITH_CALC: CardType = {
+      ...APP_TYPE,
+      fields_schema: [
+        {
+          section: "Quality",
+          fields: [
+            { key: "dqIndex", label: "DQ Index", type: "number", readonly: true } as FieldDef,
+          ],
+        } as SectionDef,
+      ],
+    };
+    getMock.mockImplementation(async (url: string): Promise<unknown> => {
+      if (url === "/relations") {
+        return [
+          {
+            id: "r1",
+            type: "depends_on",
+            source_id: app.id,
+            target_id: itc1.id,
+            source: { id: app.id, type: app.type, name: app.name },
+            target: { id: itc1.id, type: itc1.type, name: itc1.name },
+          },
+          {
+            id: "r2",
+            type: "depends_on",
+            source_id: app.id,
+            target_id: itc2.id,
+            source: { id: app.id, type: app.type, name: app.name },
+            target: { id: itc2.id, type: itc2.type, name: itc2.name },
+          },
+        ];
+      }
+      if (url.startsWith("/cards?ids=")) {
+        return { items: [itc1, itc2] };
+      }
+      return [];
+    });
+    postMock.mockImplementation(buildResolveRefsMock([app, itc1, itc2]));
+
+    // 1. Build workbook from current state.
+    const wb = await buildExportWorkbook(
+      [app],
+      APP_TYPE_WITH_CALC,
+      [APP_TYPE_WITH_CALC, ITC_TYPE],
+      [DEPENDS_ON_TYPE],
+    );
+    // 2. Re-import while the "grid" only knows about the source card
+    //    (mimics a filtered Inventory view — ITC targets aren't loaded).
+    const buf = XLSX.write(wb, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
+    const parsed = parseWorkbookSheets(buf, [APP_TYPE_WITH_CALC, ITC_TYPE]);
+    const report = await validateMultiSheet(
+      parsed,
+      [app], // filtered grid: Apps only, no ITCs
+      [APP_TYPE_WITH_CALC, ITC_TYPE],
+      [DEPENDS_ON_TYPE],
+      [
+        { id: "r1", type: "depends_on", source_id: app.id, target_id: itc1.id },
+        { id: "r2", type: "depends_on", source_id: app.id, target_id: itc2.id },
+      ],
+    );
+    expect(report.errors).toEqual([]);
+    expect(report.relationOps).toHaveLength(0);
+    const readOnlyWarnings = report.warnings.filter((w) =>
+      /read-only|ignored/i.test(w.message),
+    );
+    expect(readOnlyWarnings).toHaveLength(0);
   });
 });

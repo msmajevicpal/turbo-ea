@@ -209,6 +209,16 @@ function splitRelationCell(cell: string): string[] {
     .filter(Boolean);
 }
 
+/**
+ * Backend UUIDs are always lowercased (Python `str(uuid.UUID(...))`), but
+ * a hand-typed or stale spreadsheet cell could carry uppercase hex. Use
+ * this whenever a UUID string is used as a Map key so the diff doesn't
+ * silently miss because of case alone.
+ */
+function normalizeId(id: string): string {
+  return id.trim().toLowerCase();
+}
+
 /** Walk parent_id chain to produce the full ancestor segments (root first, including the card itself). */
 function fullPathFor(card: Card, byId: Map<string, Card>): string[] {
   const segs: string[] = [];
@@ -814,19 +824,32 @@ export function validateImport(
       const rawVal = raw[colKey];
       const val = str(rawVal);
 
-      // Read-only fields (admin-marked or calculated) cannot be set via import.
-      // If the user supplied a value, warn and skip it; otherwise stay silent.
+      // Read-only fields (admin-marked or calculated) cannot be set via
+      // import. On a round-trip the exporter emits the current value back,
+      // and re-importing it is a no-op — so only warn when the user has
+      // actually supplied a *different* value than what's on the existing
+      // card. Otherwise we'd spam one warning per (row, calc-field)
+      // combination on every re-import of an untouched workbook.
       const isReadOnly = field.readonly === true || calcFieldsForType.has(field.key);
       if (isReadOnly) {
         if (val) {
-          warnings.push({
-            row: rowNum,
-            column: colKey,
-            message: t("import.warnings.readOnlyFieldIgnored", {
+          const existingVal = matchedExisting?.attributes?.[field.key];
+          const existingStr =
+            existingVal == null
+              ? ""
+              : Array.isArray(existingVal)
+                ? existingVal.join(", ")
+                : String(existingVal);
+          if (val.trim() !== existingStr.trim()) {
+            warnings.push({
               row: rowNum,
-              field: resolveLabel(field.key, field.translations, i18n.language),
-            }),
-          });
+              column: colKey,
+              message: t("import.warnings.readOnlyFieldIgnored", {
+                row: rowNum,
+                field: resolveLabel(field.key, field.translations, i18n.language),
+              }),
+            });
+          }
         }
         continue;
       }
@@ -1123,10 +1146,6 @@ export async function validateMultiSheet(
   const relationOps: RelationOp[] = [];
   const inlineRefs: RelationCellRef[] = [];
 
-  // Build helpful indexes.
-  const byCardId = new Map<string, Card>();
-  for (const c of existingCards) byCardId.set(c.id, c);
-
   // Track all freshly-parsed creates' own path keys so a relation cell
   // can point at a row created in the same workbook.
   const fileByOwnPathKey = new Map<string, ParsedRow>();
@@ -1177,17 +1196,18 @@ export async function validateMultiSheet(
     for (const raw of sheet.rows) {
       const name = str(raw["name"] ?? raw["Name"]);
       if (!name) continue;
-      const idCell = str(raw["id"] ?? raw["Id"] ?? raw["ID"]);
       const parentPathRaw = str(raw["parent_path"]);
-      // The row's source ref (used when neither id nor same-batch match exists).
-      if (!idCell || !UUID_RE.test(idCell)) {
-        const ownPath = parentPathRaw
-          ? [...decodePath(parentPathRaw), name]
-          : [name];
-        const ownKey = pathKey(sheetType, ownPath);
-        if (!fileByOwnPathKey.has(ownKey)) {
-          stageRef(sheetType, ownPath.map(encodePathSegment).join(" / "));
-        }
+      // Always stage the row's source ref, even when `id` is a valid UUID.
+      // The diff pass uses the UUID directly when it can, but having the
+      // ref staged means `resolveRef()` has a fallback for workbooks whose
+      // UUIDs point at a different tenant (cross-instance migration) or
+      // were hand-edited away. Cheap — refs are deduped by canonical key.
+      const ownPath = parentPathRaw
+        ? [...decodePath(parentPathRaw), name]
+        : [name];
+      const ownKey = pathKey(sheetType, ownPath);
+      if (!fileByOwnPathKey.has(ownKey)) {
+        stageRef(sheetType, ownPath.map(encodePathSegment).join(" / "));
       }
       for (const col of relCols) {
         const relTypeKey = col.slice(4);
@@ -1292,7 +1312,7 @@ export async function validateMultiSheet(
     const lookupKey = refLookupKey(targetTypeKey, ref);
     const r = refResults.get(lookupKey);
     if (r?.status === "resolved" && r.id) {
-      return { kind: "id", id: r.id };
+      return { kind: "id", id: normalizeId(r.id) };
     }
     if (r?.status === "ambiguous") {
       const hints = (r.candidates ?? []).slice(0, 3).map((c) => c.path).join("; ");
@@ -1323,15 +1343,18 @@ export async function validateMultiSheet(
   // ----- Inline `rel:<key>` columns on card sheets -------------------------
   // Build a lookup: source card identity → set of existing relations of each type.
   // We use this to compute deletes (cell empty → drop everything) and noops.
-  const outgoingByCard = new Map<string, Map<string, string[]>>(); // cardId → type → target ids
+  // cardId → type → target ids. Keys are normalised so a stray uppercase
+  // hex character in the source spreadsheet can't silently miss the diff.
+  const outgoingByCard = new Map<string, Map<string, string[]>>();
   for (const rel of existingRelations) {
-    let perType = outgoingByCard.get(rel.source_id);
+    const sid = normalizeId(rel.source_id);
+    let perType = outgoingByCard.get(sid);
     if (!perType) {
       perType = new Map();
-      outgoingByCard.set(rel.source_id, perType);
+      outgoingByCard.set(sid, perType);
     }
     const list = perType.get(rel.type) || [];
-    list.push(rel.target_id);
+    list.push(normalizeId(rel.target_id));
     perType.set(rel.type, list);
   }
 
@@ -1363,20 +1386,30 @@ export async function validateMultiSheet(
       const parentPathRaw = str(raw["parent_path"]);
       if (!name) continue;
 
-      // Locate the source: either existing (UUID known via idCell) or a
-      // creates row in this batch (by own path key).
+      // Locate the source. The `id` column is authoritative — a valid
+      // UUID is trusted directly, **without** requiring the card to be
+      // in the loaded `existingCards` slice (the grid filter shouldn't
+      // affect which sheet rows the importer can process). If the UUID
+      // is stale, the bulk-apply will surface a per-row error.
       let sourceRef: CardRefHandle | undefined;
       const ownPath = parentPathRaw
         ? [...decodePath(parentPathRaw), name]
         : [name];
       const ownKey = pathKey(sheetType, ownPath);
-      if (idCell && UUID_RE.test(idCell) && byCardId.has(idCell)) {
-        sourceRef = { kind: "id", id: idCell };
+      if (idCell && UUID_RE.test(idCell)) {
+        sourceRef = { kind: "id", id: normalizeId(idCell) };
       } else if (fileByOwnPathKey.has(ownKey)) {
         sourceRef = { kind: "pathKey", pathKey: ownKey, type: sheetType };
       } else {
-        // Fallback: try to resolve against existing cards via name+path.
-        const handle = resolveRef(sheetType, ownPath.map(encodePathSegment).join(" / "), rowNum, sheet.sheet, "row");
+        // Fallback for rows whose `id` cell is missing / non-UUID — try
+        // to resolve against existing cards via the staged name+path ref.
+        const handle = resolveRef(
+          sheetType,
+          ownPath.map(encodePathSegment).join(" / "),
+          rowNum,
+          sheet.sheet,
+          "row",
+        );
         if (!handle) continue; // resolveRef already pushed an error
         sourceRef = handle;
       }

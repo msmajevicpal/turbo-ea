@@ -28,6 +28,8 @@ LeanIX-style multi-sheet spreadsheet import / export with relations: a single wo
 - **`Relations` sheet rows no longer drop when an endpoint sits outside the export filter.** Same fix applies — endpoints fall back to the embedded `rel.source` / `rel.target` ref when the full card isn't in scope.
 - **mypy** no longer reports `Incompatible types in assignment` on `app/api/v1/relations.py` — the inner loop variable was renamed so it doesn't collide with the outer `for rt in rt_by_key.values()` binding.
 - **Card names containing `/` round-trip correctly through `rel:<key>` cells.** The exporter used to write unambiguous bare-name refs verbatim, so a name like `SAP S/4HANA` (or `MATLAB/Simulink`, `CI/CD Pipelines`) was emitted as-is and the importer's path decoder split it on `/`. The bare-name path now always runs through `encodePathSegment()` so `/` and `\` survive a round-trip.
+- **Import preview no longer flags every existing relation as "to add".** The inline-cell diff used to queue an `upsert` for every target in a cell, including ones that already match a live relation. A no-op round-trip now produces zero ops on the preview; only genuinely new targets count toward "relations to add".
+- **`rel:<relation_type_key>` columns no longer raise "unrecognised column" warnings.** The per-sheet legacy validator now skips `rel:` headers (they're handled by the multi-sheet pass) instead of flagging each as unknown — so a workbook with N relation columns no longer spams N warnings per sheet.
 
 ## [1.22.2] - 2026-05-18
 

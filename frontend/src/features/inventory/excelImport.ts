@@ -531,7 +531,17 @@ export function validateImport(
     }
   }
   for (const h of headers) {
-    if (!knownCoreCols.has(h) && !knownCoreCols.has(h.toLowerCase()) && !allAttrKeys.has(h) && !h.startsWith("attr_")) {
+    // `rel:<relation_type_key>` columns are the inline relation cells —
+    // recognised and parsed by `validateMultiSheet()`'s second pass. The
+    // legacy per-sheet validator must not warn about them just because
+    // it doesn't itself process them.
+    if (h.startsWith("rel:")) continue;
+    if (
+      !knownCoreCols.has(h) &&
+      !knownCoreCols.has(h.toLowerCase()) &&
+      !allAttrKeys.has(h) &&
+      !h.startsWith("attr_")
+    ) {
       warnings.push({ column: h, message: t("import.warnings.unrecognisedColumn", { column: h }) });
     }
   }
@@ -1401,15 +1411,20 @@ export async function validateMultiSheet(
         // every target is an upsert.
         if (sourceRef.kind === "id") {
           const existingTargets = outgoingByCard.get(sourceRef.id)?.get(rt.key) || [];
+          const existingSet = new Set(existingTargets);
           const newIds = new Set<string>();
-          // Map handles to ids for new same-batch rows we resolve lazily at apply time.
-          const handlesForCompare: CardRefHandle[] = [];
           for (const h of targetHandles) {
             if (h.kind === "id") newIds.add(h.id);
-            handlesForCompare.push(h);
           }
-          // Upsert each new + existing (existing ones with no changes are no-ops at apply).
-          for (const h of handlesForCompare) {
+          // Only queue an upsert when the target isn't already in the live
+          // graph for this (source, type) — otherwise the preview's
+          // "relations to add" count would balloon to include every
+          // already-present edge, even on a no-op round-trip. Same-batch
+          // pathKey targets are never existing by definition, so they
+          // always count as a new upsert.
+          for (const h of targetHandles) {
+            const alreadyExists = h.kind === "id" && existingSet.has(h.id);
+            if (alreadyExists) continue;
             relationOps.push({
               rowIndex: rowNum,
               sheet: sheet.sheet,

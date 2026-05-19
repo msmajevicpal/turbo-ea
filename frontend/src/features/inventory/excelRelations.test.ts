@@ -313,7 +313,9 @@ describe("validateMultiSheet", () => {
     const upserts = report.relationOps.filter((o) => o.action === "upsert");
     expect(deletes).toHaveLength(1);
     expect(deletes[0].targetRef).toEqual({ kind: "id", id: "33333333-3333-3333-3333-333333333333" });
-    expect(upserts).toHaveLength(1);
+    // The remaining target (DB) already exists in the live graph, so it
+    // produces no upsert — only the removed Cache shows in the diff.
+    expect(upserts).toHaveLength(0);
   });
 });
 
@@ -567,16 +569,12 @@ describe("buildExportWorkbook", () => {
         { id: "r2", type: "depends_on", source_id: app.id, target_id: itc2.id },
       ],
     );
-    // No errors and the two existing relations re-resolve to upserts (no diff).
+    // Both targets already exist in the live graph, so a no-op
+    // round-trip must produce **zero** upserts and zero deletes — the
+    // import preview should not falsely claim to be re-creating things
+    // that already exist.
     expect(report.errors).toEqual([]);
-    const upserts = report.relationOps.filter((o) => o.action === "upsert");
-    expect(upserts).toHaveLength(2);
-    expect(upserts.map((o) => o.targetRef)).toEqual(
-      expect.arrayContaining([
-        { kind: "id", id: itc1.id },
-        { kind: "id", id: itc2.id },
-      ]),
-    );
+    expect(report.relationOps).toHaveLength(0);
   });
 
   it("still parses legacy comma-separated cells from older workbooks", async () => {
@@ -688,8 +686,58 @@ describe("buildExportWorkbook", () => {
       [{ id: "rdep", type: "depends_on", source_id: app.id, target_id: sap.id }],
     );
     expect(report.errors).toEqual([]);
+    // The relation already exists in the live graph, so a no-op
+    // round-trip emits no ops at all. The point of the test is the
+    // escape, not the diff — assert there are no spurious "missing"
+    // errors and no false-positive upserts.
+    expect(report.relationOps).toHaveLength(0);
+  });
+
+  it("emits an upsert only for genuinely new targets, not no-ops", async () => {
+    // Direct coverage of the preview-noise fix: a cell that lists two
+    // targets, one of which already exists, should produce exactly one
+    // upsert (for the new one) and zero deletes.
+    const app: Card = makeCard({
+      id: "11111111-1111-1111-1111-111111111111",
+      type: "Application",
+      name: "ERP",
+    });
+    const itc1: Card = makeCard({
+      id: "22222222-2222-2222-2222-222222222222",
+      type: "ITComponent",
+      name: "DB",
+    });
+    const itc2: Card = makeCard({
+      id: "33333333-3333-3333-3333-333333333333",
+      type: "ITComponent",
+      name: "Cache",
+    });
+    postMock.mockImplementation(buildResolveRefsMock([app, itc1, itc2]));
+    const wb = buildWorkbook(
+      [
+        {
+          id: app.id,
+          type: "Application",
+          name: "ERP",
+          "rel:depends_on": "DB; Cache",
+        },
+      ],
+      "Application",
+    );
+    const parsed = parseWorkbookSheets(wb, [APP_TYPE, ITC_TYPE]);
+    const report = await validateMultiSheet(
+      parsed,
+      [app, itc1, itc2],
+      [APP_TYPE, ITC_TYPE],
+      [DEPENDS_ON_TYPE],
+      // Only the DB relation exists — Cache is the genuinely new one.
+      [{ id: "r1", type: "depends_on", source_id: app.id, target_id: itc1.id }],
+    );
+    expect(report.errors).toEqual([]);
     const upserts = report.relationOps.filter((o) => o.action === "upsert");
+    const deletes = report.relationOps.filter((o) => o.action === "delete");
     expect(upserts).toHaveLength(1);
-    expect(upserts[0].targetRef).toEqual({ kind: "id", id: sap.id });
+    expect(upserts[0].targetRef).toEqual({ kind: "id", id: itc2.id });
+    expect(deletes).toHaveLength(0);
   });
 });

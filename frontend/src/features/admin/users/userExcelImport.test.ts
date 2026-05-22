@@ -197,14 +197,13 @@ describe("validateUserImport", () => {
     expect(rpt.creates).toHaveLength(1);
   });
 
-  it("forwards auth_provider from the sheet for new users", () => {
+  it("forwards auth_provider from the sheet for new users (no password column needed)", () => {
     const rpt = validateUserImport(
       [
         {
           email: "carol@example.com",
           display_name: "Carol",
           role: "member",
-          password: "StrongPass1",
           auth_provider: "local",
         },
         {
@@ -240,20 +239,24 @@ describe("validateUserImport", () => {
     expect(rpt.creates).toHaveLength(0);
   });
 
-  it("rejects auth_provider=local with no password on a new user", () => {
+  it("warns and drops the password column when present in the sheet", () => {
     const rpt = validateUserImport(
       [
         {
           email: "frank@example.com",
           display_name: "Frank",
           role: "viewer",
+          password: "ShouldBeIgnored1",
           auth_provider: "local",
         },
       ],
       [],
       ROLES,
     );
-    expect(rpt.errors.some((e) => e.column === "password")).toBe(true);
-    expect(rpt.creates).toHaveLength(0);
+    expect(rpt.errors).toHaveLength(0);
+    expect(rpt.warnings.some((w) => w.column === "password")).toBe(true);
+    expect(rpt.creates).toHaveLength(1);
+    // No password leaks through to the create payload.
+    expect("password" in rpt.creates[0]).toBe(false);
   });
 });

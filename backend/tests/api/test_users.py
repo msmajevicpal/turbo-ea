@@ -615,17 +615,50 @@ class TestUpdateUser:
         assert u.auth_provider == "local"
         assert u.password_hash is not None
 
-    async def test_create_user_explicit_auth_provider_local_requires_password(
+    async def test_create_user_local_no_password_with_invite_issues_setup_token(
         self, client, db, users_env
     ):
-        """`auth_provider="local"` without a password is rejected — a local
-        account with no password can't sign in."""
+        """Local account, no password, send_email=True → the user is created
+        with a single-use password_setup_token; the invite email carries the
+        /auth/set-password?token=… link so the user picks their own password.
+        Passwords are never transported through the import sheet (#584)."""
+        from sqlalchemy import select
+
+        from app.models.user import User
+
         admin = users_env["admin"]
         resp = await client.post(
             "/api/v1/users",
             json={
-                "email": "no-pass-local@test.com",
-                "display_name": "No Pass Local",
+                "email": "local-pending@test.com",
+                "display_name": "Local Pending",
+                "role": "member",
+                "send_email": True,
+                "auth_provider": "local",
+            },
+            headers=auth_headers(admin),
+        )
+        assert resp.status_code == 201, resp.text
+
+        user_q = await db.execute(select(User).where(User.email == "local-pending@test.com"))
+        u = user_q.scalar_one()
+        assert u.auth_provider == "local"
+        assert u.password_hash is None
+        assert u.password_setup_token is not None
+        assert len(u.password_setup_token) >= 32  # urlsafe(48) → 64 chars
+
+    async def test_create_user_local_no_password_without_invite_rejected(
+        self, client, db, users_env
+    ):
+        """Local account, no password, no invite → reject. The setup link
+        only travels via email, so without the welcome email the user has
+        no way into the system."""
+        admin = users_env["admin"]
+        resp = await client.post(
+            "/api/v1/users",
+            json={
+                "email": "local-orphan@test.com",
+                "display_name": "Local Orphan",
                 "role": "member",
                 "send_email": False,
                 "auth_provider": "local",
@@ -633,7 +666,7 @@ class TestUpdateUser:
             headers=auth_headers(admin),
         )
         assert resp.status_code == 400
-        assert "password" in resp.json()["detail"].lower()
+        assert "invitation" in resp.json()["detail"].lower()
 
     async def test_create_user_explicit_auth_provider_sso_requires_sso_enabled(
         self, client, db, users_env

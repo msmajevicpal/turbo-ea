@@ -480,11 +480,17 @@ async def create_user(
 
     if body.auth_provider == "local":
         auth_provider = "local"
-        if not body.password:
+        if not body.password and not body.send_email:
+            # Local account with no password and no invite — the user has
+            # no way to reach the system. Bulk imports leave the password
+            # column blank by design (passwords don't belong in
+            # spreadsheets) and rely on the welcome email to deliver a
+            # password-setup link instead.
             raise HTTPException(
                 400,
-                "A password is required when creating a local account. "
-                "Set a password or mark the user as SSO.",
+                "Local accounts without a password need an invitation email "
+                "to deliver the password-setup link. Tick «send invites» or "
+                "set a password.",
             )
     elif body.auth_provider == "sso":
         auth_provider = "sso"
@@ -506,12 +512,21 @@ async def create_user(
 
     pw_hash = hash_password(body.password) if body.password else None
 
+    # For local accounts created without a password, generate a single-use
+    # setup token. The invite email links to /auth/set-password?token=<...>
+    # so the user picks their own password — the password never has to
+    # travel through an import sheet or the admin's clipboard.
+    from app.api.v1.auth import generate_setup_token
+
+    setup_token = generate_setup_token() if auth_provider == "local" and not body.password else None
+
     u = User(
         email=email,
         display_name=body.display_name,
         password_hash=pw_hash,
         role=body.role,
         auth_provider=auth_provider,
+        password_setup_token=setup_token,
     )
     db.add(u)
 
@@ -543,20 +558,11 @@ async def create_user(
     if body.send_email:
         from app.services.email_service import _get_app_title, send_notification_email
 
-        app_title = _get_app_title()
-        invite_title = f"You've been invited to {app_title}"
-
-        if sso_enabled:
-            invite_message = (
-                f"You have been invited to join {app_title}. Click the button below to sign in."
-            )
-        else:
-            invite_message = (
-                f"You have been invited to join {app_title}. "
-                "A password has been set for your account. "
-                "Click the button below to sign in."
-            )
-        invite_link = "/"
+        invite_title, invite_message, invite_link = _build_invite_email(
+            app_title=_get_app_title(),
+            setup_token=u.password_setup_token,
+            sso_enabled=sso_enabled,
+        )
 
         try:
             sent = await send_notification_email(

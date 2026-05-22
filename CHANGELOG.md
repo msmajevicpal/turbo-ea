@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [1.25.1] - 2026-05-22
 
 ### Fixed
-- **User import respects «send invites» checkbox.** Importing users via Admin → Users & Roles with the *send invites* box unchecked no longer flags the new accounts as **Invited** and no longer adds them to the pending invitations list. In SSO mode the email→role binding is still created so the SSO callback applies the right role on first sign-in (#584).
+- **User import respects «send invites» checkbox.** Importing users via Admin → Users & Roles with the *send invites* box unchecked no longer flags the new accounts as **Invited** and no longer adds them to the pending invitations list — regardless of whether SSO is enabled. The role is stored on the user row, so SSO sign-in still picks up the right role on first login (#584).
 - **Application Title applied on public pages.** The browser tab title now shows the admin-configured Application Title on every public route — Web Portals (`/portal/:slug`) and the public auth pages (set-password, forgot/reset-password, SSO callback) — instead of the static «Turbo EA» fallback. Title-sync was hoisted to the App root so the next public page someone adds inherits the same behaviour automatically (#590).
 
 ## [1.25.0] - 2026-05-22

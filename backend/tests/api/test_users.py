@@ -484,16 +484,22 @@ class TestUpdateUser:
         assert resp.status_code == 200
         assert any(inv["email"] == "import-with-invite@test.com" for inv in resp.json())
 
-    async def test_create_user_sso_enabled_always_creates_invitation(self, client, db, users_env):
-        """In SSO mode the SsoInvitation row is the email→role binding the
-        SSO callback uses on first sign-in, so it must be created regardless
-        of the send_email flag."""
+    async def test_create_user_sso_enabled_without_invite_skips_invitation(
+        self, client, db, users_env
+    ):
+        """In SSO mode with send_email=False the SsoInvitation row must NOT
+        be created either — the admin explicitly opted out of notifying the
+        user, so the «Invited» chip must stay off (#584 round 2). The User
+        row still carries `auth_provider="sso"` and the chosen role, so the
+        SSO callback's «link existing user» branch picks up the right role
+        on first sign-in without needing a binding row.
+        """
         from sqlalchemy import select
 
         from app.models.app_settings import AppSettings
         from app.models.sso_invitation import SsoInvitation
+        from app.models.user import User
 
-        # Flip SSO on via app_settings.
         db.add(
             AppSettings(
                 id="default",
@@ -506,18 +512,67 @@ class TestUpdateUser:
         resp = await client.post(
             "/api/v1/users",
             json={
-                "email": "sso-user@test.com",
-                "display_name": "SSO User",
+                "email": "sso-no-invite@test.com",
+                "display_name": "SSO No Invite",
                 "role": "member",
                 "send_email": False,
-                # No password — allowed in SSO mode (user will sign in via SSO).
+                # No password — allowed in SSO mode.
+            },
+            headers=auth_headers(admin),
+        )
+        assert resp.status_code == 201, resp.text
+
+        # No SsoInvitation row → no «Invited» chip.
+        inv_q = await db.execute(
+            select(SsoInvitation).where(SsoInvitation.email == "sso-no-invite@test.com")
+        )
+        assert inv_q.scalar_one_or_none() is None
+
+        # User row IS there with the chosen role + SSO auth provider, so SSO
+        # sign-in will resolve the role from `user.role` directly.
+        user_q = await db.execute(select(User).where(User.email == "sso-no-invite@test.com"))
+        u = user_q.scalar_one()
+        assert u.auth_provider == "sso"
+        assert u.role == "member"
+
+        # Not on the pending invitations list.
+        resp = await client.get("/api/v1/users/invitations", headers=auth_headers(admin))
+        assert resp.status_code == 200
+        assert all(inv["email"] != "sso-no-invite@test.com" for inv in resp.json())
+
+    async def test_create_user_sso_enabled_with_invite_creates_invitation(
+        self, client, db, users_env
+    ):
+        """SSO mode + send_email=True still creates the SsoInvitation so the
+        resend-invite UX continues to work for genuine SSO invitations."""
+        from sqlalchemy import select
+
+        from app.models.app_settings import AppSettings
+        from app.models.sso_invitation import SsoInvitation
+
+        db.add(
+            AppSettings(
+                id="default",
+                general_settings={"sso": {"enabled": True, "provider": "generic_oidc"}},
+            )
+        )
+        await db.commit()
+
+        admin = users_env["admin"]
+        resp = await client.post(
+            "/api/v1/users",
+            json={
+                "email": "sso-with-invite@test.com",
+                "display_name": "SSO With Invite",
+                "role": "member",
+                "send_email": True,
             },
             headers=auth_headers(admin),
         )
         assert resp.status_code == 201, resp.text
 
         inv_q = await db.execute(
-            select(SsoInvitation).where(SsoInvitation.email == "sso-user@test.com")
+            select(SsoInvitation).where(SsoInvitation.email == "sso-with-invite@test.com")
         )
         assert inv_q.scalar_one_or_none() is not None
 

@@ -497,16 +497,16 @@ async def create_user(
     )
     db.add(u)
 
-    # Create an SSO invitation only when actually needed:
-    # - SSO enabled: required so the SSO callback applies the right role on
-    #   first sign-in (the row is the email→role binding).
-    # - Local mode with send_email=True: keeps the user on the «pending
-    #   invitations» list so admins can resend the welcome email until first
-    #   login (#539).
-    # - Local mode with send_email=False: admin pre-set a password and
-    #   explicitly opted out of notifying the user — the account is active
-    #   from creation, not «Invited» (#584).
-    if sso_enabled or body.send_email:
+    # Create the SsoInvitation row only when the admin actually asked to
+    # send an invite email. The row carries two semantics: (a) it's what
+    # drives the «Invited» chip in the admin grid (and the pending
+    # invitations list that powers the resend-invite UX, #539), and (b)
+    # it's the email→role binding the SSO callback consults *only when no
+    # User row exists yet*. The create_user path always creates the User
+    # row with the role baked in above, so the SSO callback's «link
+    # existing user» branch uses `user.role` directly — no SsoInvitation
+    # needed for role binding in this scenario (#584).
+    if body.send_email:
         sso_inv = SsoInvitation(
             email=email,
             role=body.role,

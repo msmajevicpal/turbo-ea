@@ -237,7 +237,7 @@ Cinq outils permettent à un agent d'IA de transformer des artefacts en données
 | `resolve_card_refs` | Pré-valide les références basées sur le nom avant un import en masse — utile pour faire remonter à l'utilisateur les parents ambigus ou manquants. |
 | `upsert_relations_bulk` | Crée ou supprime des relations entre fiches. Source / cible / type sont validés contre le métamodèle. |
 | `create_diagram` | Crée un diagramme DrawIO libre avec des liens optionnels vers des fiches existantes. |
-| `import_bpmn` | Enregistre un diagramme XML BPMN 2.0 sur une fiche Processus métier. Trouve la fiche par son nom, la crée si elle est absente, puis enregistre le diagramme en un seul appel. |
+| `import_bpmn` | Enregistre un diagramme XML BPMN 2.0 sur une fiche Processus métier **existante**. Si aucune fiche ne correspond au nom fourni, l'outil renvoie une erreur `card_not_found` qui renvoie l'agent vers `create_cards_bulk` — cela force la création explicite de la fiche avec description, sous-type et attributs au préalable, plutôt qu'un raccourci qui crée une fiche pauvre. |
 
 Flux typique lorsqu'un utilisateur partage un tableur avec l'agent d'IA :
 

@@ -632,29 +632,6 @@ async def get_card_documents(card_id: str) -> str:
 # preview which existing cards a DrawIO XML payload would link.
 _DRAWIO_CARD_ID_RE = re.compile(r'cardId="([0-9a-fA-F-]{36})"')
 
-# Match a `<bpmn:documentation>...</bpmn:documentation>` child of the top
-# `<bpmn:process>` element so `import_bpmn` can seed a sensible description
-# on the BusinessProcess card when the agent doesn't supply one. Tolerant
-# of arbitrary namespace prefixes (`bpmn:`, `bpmn2:`, none) and of
-# inter-tag whitespace.
-_BPMN_PROCESS_DOC_RE = re.compile(
-    r"<(?:\w+:)?process\b[^>]*>\s*<(?:\w+:)?documentation\b[^>]*>(.*?)</(?:\w+:)?documentation>",
-    re.DOTALL | re.IGNORECASE,
-)
-
-
-def _extract_bpmn_process_documentation(bpmn_xml: str) -> str | None:
-    """Best-effort grab of `<bpmn:process>`'s `<documentation>` body.
-
-    Pure regex so the MCP server stays free of XML parsers. Returns None
-    if no documentation child sits at the top of the first process tag —
-    the most common case in real-world BPMN.
-    """
-    match = _BPMN_PROCESS_DOC_RE.search(bpmn_xml)
-    if not match:
-        return None
-    text = match.group(1).strip()
-    return text or None
 
 
 def _writes_disabled_message() -> str | None:
@@ -916,47 +893,43 @@ async def import_bpmn(
     business_process_name: str,
     bpmn_xml: str,
     parent_card: str | None = None,
-    description: str | None = None,
-    attributes: dict | None = None,
     svg_thumbnail: str = "",
     dry_run: bool = True,
 ) -> str:
-    """Save a BPMN 2.0 diagram against a BusinessProcess card.
+    """Save a BPMN 2.0 diagram against an existing BusinessProcess card.
 
-    Finds the matching `BusinessProcess` card by name (resolving by the
-    name search endpoint). If no card matches the name, this tool creates
-    one in the same call (using `business_process_name` as the card name
-    and `parent_card` as the optional parent reference). If multiple
-    cards match, the tool refuses to write and lists the candidates —
-    the agent should re-call with `parent_card` to disambiguate.
+    This tool deliberately does **not** create cards. If the named
+    BusinessProcess card does not exist yet, the tool returns a
+    `card_not_found` error and asks you to create it first with
+    `create_cards_bulk` — populated with the right description, subtype
+    (`category` / `group` / `process` / `variant`), attributes
+    (`processType`, `maturity`, `automationLevel`, …), and parent
+    hierarchy. Splitting the steps keeps card metadata out of the BPMN
+    flow path and forces a deliberate "set up the card properly, then
+    attach the diagram" sequence.
 
-    The backend parses the BPMN XML, extracts tasks/events/gateways/lanes
-    and stores them as ProcessElement rows linked to the BusinessProcess
-    card. Element-to-card links (Application/DataObject/ITComponent) are
-    a separate later step the user does in the BPM editor.
+    The diagram is saved via the draft → submit → approve workflow so it
+    lands in the `published` flow that the Process Flow tab actually
+    renders. The approve step extracts ProcessElement rows from the BPMN
+    for the EA cross-reference panel. If the caller has `bpm.edit` but
+    not `card.approval_status` (i.e. not a process owner / admin /
+    bpm_admin), the tool stops at `pending` and surfaces a warning with
+    the URL to approve from the UI.
 
     Args:
-        business_process_name: Card name to find or create.
-        bpmn_xml: BPMN 2.0 XML.
-        parent_card: Optional parent BusinessProcess card name to
-            disambiguate against (or to use as parent when creating).
-        description: Optional description for the BusinessProcess card.
-            If omitted and the tool needs to create the card, it falls
-            back to the BPMN's top-level `<bpmn:documentation>` if
-            present, otherwise leaves the description blank. Ignored
-            when the card already exists — pre-existing cards are never
-            mutated by this tool.
-        attributes: Optional metamodel attributes for the new card
-            (e.g. `{"processType": "Core", "automationLevel": "high"}`).
-            Same "ignored on existing card" semantics as `description`.
+        business_process_name: Name of an existing BusinessProcess card.
+            Must match exactly (whitespace-trimmed, case-sensitive).
+        bpmn_xml: BPMN 2.0 XML. Stored verbatim — the backend never
+            rewrites the BPMNDI plane or the Collaboration/Participant
+            metadata.
+        parent_card: Optional parent BusinessProcess card name used
+            **only** to disambiguate when multiple cards share the same
+            name. Not used to create anything.
         svg_thumbnail: Optional SVG snapshot of the diagram.
-        dry_run: When True (default), validate every step without
-            persisting. When the BusinessProcess card doesn't exist yet,
-            the dry-run previews the would-be card creation but skips the
-            diagram save step (no card_id to attach against in a
-            rolled-back transaction). **Call again with dry_run=False to
-            actually create the card and persist the diagram** — without
-            that second call, both will roll back.
+        dry_run: When True (default), validate the existing-card lookup
+            and return a flow-node count preview without persisting the
+            diagram. Call again with `dry_run=False` to walk the
+            draft → submit → approve workflow.
     """
     token = await _get_current_token()
     if not token:
@@ -994,80 +967,30 @@ async def import_bpmn(
             }
         )
 
-    create_card_result: dict | None = None
     process_id: str | None = exact[0].get("id") if exact else None
-    # Surface a warning if the agent supplied description/attributes for a
-    # card that already exists — we never mutate existing cards from this
-    # tool, so the inputs would silently get dropped without this hint.
-    ignored_inputs: list[str] = []
-    if process_id is not None:
-        if description is not None:
-            ignored_inputs.append("description")
-        if attributes:
-            ignored_inputs.append("attributes")
 
     if process_id is None:
-        # Step 2: create the BusinessProcess card. Default the description
-        # to the BPMN's process-level documentation block so the card
-        # doesn't land blank when the agent didn't supply one.
-        effective_description = (
-            description
-            if description is not None
-            else _extract_bpmn_process_documentation(bpmn_xml)
+        # Card doesn't exist — refuse to create one. The tool is
+        # deliberately single-purpose ("save BPMN against existing card")
+        # so cards always go through the full create_cards_bulk path
+        # where the agent populates description, subtype, attributes
+        # and parent properly. Without this guard the agent takes the
+        # one-call shortcut and the card lands sparse.
+        return _fmt(
+            {
+                "error": "card_not_found",
+                "business_process_name": business_process_name,
+                "next_action": (
+                    f"No BusinessProcess card named '{business_process_name}' "
+                    "exists. Create it first via create_cards_bulk with "
+                    "type='BusinessProcess' — populate description, "
+                    "subtype (one of: category / group / process / variant), "
+                    "attributes (processType, maturity, automationLevel, …), "
+                    "and parent hierarchy as needed. Then re-call "
+                    "import_bpmn with the same business_process_name."
+                ),
+            }
         )
-        card_row: dict = {
-            "row_index": 0,
-            "type": "BusinessProcess",
-            "name": business_process_name,
-        }
-        if parent_card:
-            card_row["parent_name"] = parent_card
-            card_row["parent_path"] = []
-        if effective_description:
-            card_row["description"] = effective_description
-        if attributes:
-            card_row["attributes"] = attributes
-        bulk_payload = {
-            "cards": [card_row],
-            "dry_run": dry_run,
-        }
-        create_card_result = await client.post("/cards/bulk-create", json=bulk_payload)
-        results = (
-            create_card_result.get("results", [])
-            if isinstance(create_card_result, dict)
-            else []
-        )
-        if not results or results[0].get("status") != "created":
-            return _fmt(
-                {
-                    "error": "business_process_create_failed",
-                    "create_card_result": create_card_result,
-                }
-            )
-        # In dry-run mode the card was rolled back — we have no real id to
-        # use for step 3. Report the preview and ask the agent to commit.
-        if dry_run:
-            return _fmt(
-                {
-                    "dry_run": True,
-                    "committed": False,
-                    "would_create_business_process": True,
-                    "business_process_name": business_process_name,
-                    "parent_card": parent_card,
-                    "create_card_result": create_card_result,
-                    "next_action": (
-                        "NOTHING HAS BEEN PERSISTED YET. Surface this "
-                        "preview to the user; on their confirmation, "
-                        "re-call import_bpmn with the same arguments plus "
-                        "dry_run=False to actually create the card and "
-                        "save the diagram in one call."
-                    ),
-                }
-            )
-        process_id = results[0].get("id")
-
-    if not process_id:
-        return _fmt({"error": "no_process_id", "create_card_result": create_card_result})
 
     # Step 3: persist the diagram via the flow-version workflow. The card
     # detail's Process Flow tab reads from
@@ -1096,8 +1019,6 @@ async def import_bpmn(
             "dry_run": True,
             "committed": False,
             "business_process_id": process_id,
-            "business_process_created": False,
-            "create_card_result": create_card_result,
             "diagram_preview": {
                 "flow_nodes_estimated": preview_node_count,
                 "bpmn_xml_bytes": len(bpmn_xml),
@@ -1109,13 +1030,6 @@ async def import_bpmn(
                 "publish it as the active process flow."
             ),
         }
-        if ignored_inputs:
-            response["warning"] = (
-                f"BusinessProcess card '{business_process_name}' already "
-                f"exists; the following inputs would be ignored on commit: "
-                f"{', '.join(ignored_inputs)}. This tool never mutates "
-                "pre-existing cards."
-            )
         return _fmt(response)
 
     # --- Commit path: draft -> submit -> approve ---
@@ -1167,8 +1081,6 @@ async def import_bpmn(
         "dry_run": False,
         "committed": True,
         "business_process_id": process_id,
-        "business_process_created": create_card_result is not None,
-        "create_card_result": create_card_result,
         "workflow_state": workflow_state,
         "draft_id": draft_id,
         "submit_result": submit_result,
@@ -1193,18 +1105,6 @@ async def import_bpmn(
     }
     if publish_warning:
         response["warning"] = publish_warning
-    if ignored_inputs:
-        existing_warning = response.get("warning", "")
-        carded_warning = (
-            f"BusinessProcess card '{business_process_name}' already exists; "
-            f"the following inputs were ignored (this tool never mutates "
-            f"pre-existing cards): {', '.join(ignored_inputs)}."
-        )
-        response["warning"] = (
-            f"{existing_warning} {carded_warning}".strip()
-            if existing_warning
-            else carded_warning
-        )
     return _fmt(response)
 
 

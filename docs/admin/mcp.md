@@ -237,7 +237,7 @@ Five tools let an AI agent turn artifacts into structured EA data. The agent rea
 | `resolve_card_refs` | Pre-validate name-based references before a bulk import — useful for surfacing ambiguous or missing parents to the user. |
 | `upsert_relations_bulk` | Create or delete relations between cards. Source / target / type are validated against the metamodel. |
 | `create_diagram` | Create a free-form DrawIO diagram with optional links to existing cards. |
-| `import_bpmn` | Save a BPMN 2.0 XML diagram against a Business Process card. Finds the card by name, creates it if missing, then saves the diagram in one call. |
+| `import_bpmn` | Save a BPMN 2.0 XML diagram against an **existing** Business Process card. If no card matches the given name, the tool returns a `card_not_found` error pointing the agent at `create_cards_bulk` — this forces the agent to create the card explicitly with description, subtype and attributes first, instead of taking a shortcut that lands a sparse card. |
 
 Typical workflow when a user shares a spreadsheet with the AI agent:
 

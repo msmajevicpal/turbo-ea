@@ -237,7 +237,7 @@ Fünf Werkzeuge erlauben einem KI-Agenten, Artefakte in strukturierte EA-Daten u
 | `resolve_card_refs` | Vorvalidiert namensbasierte Referenzen vor einem Bulk-Import — nützlich, um mehrdeutige oder fehlende Eltern dem Benutzer anzuzeigen. |
 | `upsert_relations_bulk` | Erstellt oder löscht Beziehungen zwischen Karten. Quelle / Ziel / Typ werden gegen das Metamodell validiert. |
 | `create_diagram` | Erstellt ein frei gestaltetes DrawIO-Diagramm mit optionalen Verknüpfungen zu bestehenden Karten. |
-| `import_bpmn` | Speichert ein BPMN-2.0-XML-Diagramm an einer Geschäftsprozess-Karte. Sucht die Karte per Name, erstellt sie bei Bedarf und speichert das Diagramm in einem Aufruf. |
+| `import_bpmn` | Speichert ein BPMN-2.0-XML-Diagramm an einer **bestehenden** Geschäftsprozess-Karte. Existiert keine Karte mit dem angegebenen Namen, liefert das Werkzeug einen `card_not_found`-Fehler, der den Agenten an `create_cards_bulk` verweist — so muss die Karte zuerst explizit mit Beschreibung, Subtyp und Attributen angelegt werden, statt auf eine Abkürzung auszuweichen, die eine spärliche Karte erzeugt. |
 
 Typischer Ablauf, wenn ein Benutzer dem KI-Agenten eine Tabelle freigibt:
 

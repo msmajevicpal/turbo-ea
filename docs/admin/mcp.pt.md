@@ -237,7 +237,7 @@ Cinco ferramentas permitem que um agente de IA transforme artefatos em dados EA 
 | `resolve_card_refs` | Pré-valida referências baseadas em nome antes de uma importação em massa — útil para mostrar ao usuário pais ambíguos ou ausentes. |
 | `upsert_relations_bulk` | Cria ou exclui relações entre cards. Origem / destino / tipo são validados contra o metamodelo. |
 | `create_diagram` | Cria um diagrama DrawIO livre com vínculos opcionais a cards existentes. |
-| `import_bpmn` | Salva um diagrama BPMN 2.0 XML em um card de Processo de negócio. Localiza o card por nome, cria-o se estiver ausente e salva o diagrama em uma única chamada. |
+| `import_bpmn` | Salva um diagrama BPMN 2.0 XML em um card de Processo de negócio **existente**. Se nenhum card corresponder ao nome fornecido, a ferramenta retorna um erro `card_not_found` que aponta o agente para `create_cards_bulk` — isso obriga a criação explícita do card com descrição, subtipo e atributos antes, em vez de um atalho que deixa um card pobre. |
 
 Fluxo típico quando um usuário compartilha uma planilha com o agente de IA:
 

@@ -338,134 +338,32 @@ class TestImportBpmn:
         assert data["diagram_preview"]["flow_nodes_estimated"] == 3
 
     @pytest.mark.asyncio
-    async def test_create_new_passes_description_through(self, fake_token):
-        """When the card doesn't exist and the agent provides description /
-        attributes, the new BusinessProcess card lands with them."""
+    async def test_missing_card_returns_card_not_found_with_next_action(
+        self, fake_token
+    ):
+        """import_bpmn no longer auto-creates a BusinessProcess card —
+        forcing the agent into the explicit two-step flow (create card
+        with all metadata via create_cards_bulk, then import the BPMN).
+        Tested both with and without an existing match."""
         get_mock = AsyncMock(return_value={"items": [], "total": 0})
-        bulk_payload_captured: dict = {}
-
-        async def _post(path, json=None):
-            if path == "/cards/bulk-create":
-                bulk_payload_captured.update(json or {})
-                return {
-                    "results": [
-                        {"row_index": 0, "status": "created", "id": "bp-new"}
-                    ],
-                    "created": 1,
-                    "failed": 0,
-                    "dry_run": False,
-                }
-            if path.endswith("/flow/drafts"):
-                return {"id": "d1", "status": "draft"}
-            if path.endswith("/submit"):
-                return {"id": "d1", "status": "pending"}
-            if path.endswith("/approve"):
-                return {"id": "d1", "status": "published"}
-            raise AssertionError(path)
-
+        post_mock = AsyncMock()  # must not be called
         with (
             patch.object(server.TurboEAClient, "get", get_mock),
-            patch.object(server.TurboEAClient, "post", AsyncMock(side_effect=_post)),
-        ):
-            await server.import_bpmn(
-                business_process_name="New Process",
-                bpmn_xml="<bpmn:definitions/>",
-                description="Order intake to shipment",
-                attributes={"processType": "Core"},
-                dry_run=False,
-            )
-        card_row = bulk_payload_captured["cards"][0]
-        assert card_row["description"] == "Order intake to shipment"
-        assert card_row["attributes"] == {"processType": "Core"}
-
-    @pytest.mark.asyncio
-    async def test_create_new_falls_back_to_bpmn_documentation(self, fake_token):
-        """When the agent omits a description, the tool seeds it from the
-        BPMN's <bpmn:process><bpmn:documentation> child if present."""
-        get_mock = AsyncMock(return_value={"items": [], "total": 0})
-        bulk_payload_captured: dict = {}
-
-        async def _post(path, json=None):
-            if path == "/cards/bulk-create":
-                bulk_payload_captured.update(json or {})
-                return {
-                    "results": [
-                        {"row_index": 0, "status": "created", "id": "bp-new"}
-                    ],
-                    "created": 1,
-                    "failed": 0,
-                    "dry_run": False,
-                }
-            if path.endswith("/flow/drafts"):
-                return {"id": "d1", "status": "draft"}
-            if path.endswith("/submit"):
-                return {"id": "d1", "status": "pending"}
-            if path.endswith("/approve"):
-                return {"id": "d1", "status": "published"}
-            raise AssertionError(path)
-
-        bpmn = (
-            '<bpmn:definitions xmlns:bpmn="http://example/">'
-            '<bpmn:process id="P1" name="X">'
-            "  <bpmn:documentation>Auto-extracted process docs.</bpmn:documentation>"
-            "</bpmn:process>"
-            "</bpmn:definitions>"
-        )
-        with (
-            patch.object(server.TurboEAClient, "get", get_mock),
-            patch.object(server.TurboEAClient, "post", AsyncMock(side_effect=_post)),
-        ):
-            await server.import_bpmn(
-                business_process_name="X", bpmn_xml=bpmn, dry_run=False
-            )
-        assert (
-            bulk_payload_captured["cards"][0]["description"]
-            == "Auto-extracted process docs."
-        )
-
-    @pytest.mark.asyncio
-    async def test_existing_card_warns_when_description_supplied(self, fake_token):
-        """Description/attributes passed against a card that already exists
-        are ignored (no mutation of pre-existing cards) — but the response
-        flags this so the agent can tell the user."""
-        get_mock = AsyncMock(
-            return_value={
-                "items": [{"id": "bp-1", "name": "OnSale", "parent_id": None}],
-                "total": 1,
-            }
-        )
-
-        bulk_called = False
-
-        async def _post(path, json=None):
-            nonlocal bulk_called
-            if path == "/cards/bulk-create":
-                bulk_called = True
-                return {}
-            if path.endswith("/flow/drafts"):
-                return {"id": "d1", "status": "draft"}
-            if path.endswith("/submit"):
-                return {"id": "d1", "status": "pending"}
-            if path.endswith("/approve"):
-                return {"id": "d1", "status": "published"}
-            raise AssertionError(path)
-
-        with (
-            patch.object(server.TurboEAClient, "get", get_mock),
-            patch.object(server.TurboEAClient, "post", AsyncMock(side_effect=_post)),
+            patch.object(server.TurboEAClient, "post", post_mock),
         ):
             out = await server.import_bpmn(
-                business_process_name="OnSale",
+                business_process_name="Brand New Process",
                 bpmn_xml="<bpmn:definitions/>",
-                description="trying to set a description",
-                attributes={"processType": "Core"},
                 dry_run=False,
             )
-        assert not bulk_called, "card already existed; no /cards/bulk-create"
+        post_mock.assert_not_called()
         data = _parse(out)
-        assert "warning" in data
-        assert "description" in data["warning"]
-        assert "attributes" in data["warning"]
+        assert data["error"] == "card_not_found"
+        assert data["business_process_name"] == "Brand New Process"
+        # Next-action must spell out the recovery path concretely so the
+        # agent doesn't paper over it with a different attempt.
+        assert "create_cards_bulk" in data["next_action"]
+        assert "type='BusinessProcess'" in data["next_action"]
 
     @pytest.mark.asyncio
     async def test_dry_run_response_signals_not_committed(self, fake_token):
@@ -489,34 +387,24 @@ class TestImportBpmn:
         assert "NOT" in data["next_action"]
 
     @pytest.mark.asyncio
-    async def test_create_new_dry_run_skips_diagram_step(self, fake_token):
-        # No matching BusinessProcess card — in dry-run, we preview the
-        # would-be card create but skip step 3 (no card_id to attach to).
+    async def test_missing_card_returns_card_not_found_in_dry_run_too(
+        self, fake_token
+    ):
+        # dry_run defaults to True — verify the same card_not_found
+        # error path fires in dry-run so the agent gets the same signal.
         get_mock = AsyncMock(return_value={"items": [], "total": 0})
-        post_mock = AsyncMock(
-            return_value={
-                "results": [
-                    {"row_index": 0, "status": "created", "id": "would-be-id"}
-                ],
-                "created": 1,
-                "failed": 0,
-                "dry_run": True,
-            }
-        )
-        put_mock = AsyncMock()  # must not be called
+        post_mock = AsyncMock()
         with (
             patch.object(server.TurboEAClient, "get", get_mock),
             patch.object(server.TurboEAClient, "post", post_mock),
-            patch.object(server.TurboEAClient, "put", put_mock),
         ):
             out = await server.import_bpmn(
                 business_process_name="Brand New Process",
                 bpmn_xml="<bpmn:definitions/>",
             )
-        put_mock.assert_not_called()
+        post_mock.assert_not_called()
         data = _parse(out)
-        assert data["dry_run"] is True
-        assert data["would_create_business_process"] is True
+        assert data["error"] == "card_not_found"
 
     @pytest.mark.asyncio
     async def test_multi_match_refuses(self, fake_token):
@@ -540,26 +428,22 @@ class TestImportBpmn:
 
     @pytest.mark.asyncio
     async def test_commit_walks_draft_submit_approve(self, fake_token):
-        """Commit path: create card -> POST /flow/drafts -> /submit ->
-        /approve. The diagram has to be `published` to render in the
-        Process Flow tab; landing only as a draft would explain
+        """Commit path against an existing card: POST /flow/drafts ->
+        /submit -> /approve. The diagram has to be `published` to render
+        in the Process Flow tab; landing only as a draft would explain
         «agent says success, editor shows blank»."""
-        get_mock = AsyncMock(return_value={"items": [], "total": 0})
+        get_mock = AsyncMock(
+            return_value={
+                "items": [{"id": "bp-1", "name": "Order to Cash", "parent_id": None}],
+                "total": 1,
+            }
+        )
 
         post_calls: list[tuple[str, dict]] = []
 
         async def _post(path, json=None):
             post_calls.append((path, json or {}))
-            if path == "/cards/bulk-create":
-                return {
-                    "results": [
-                        {"row_index": 0, "status": "created", "id": "new-bp-id"}
-                    ],
-                    "created": 1,
-                    "failed": 0,
-                    "dry_run": False,
-                }
-            if path == "/bpm/processes/new-bp-id/flow/drafts":
+            if path == "/bpm/processes/bp-1/flow/drafts":
                 return {"id": "draft-1", "status": "draft", "revision": 1}
             if path.endswith("/submit"):
                 return {"id": "draft-1", "status": "pending", "revision": 1}
@@ -572,23 +456,22 @@ class TestImportBpmn:
             patch.object(server.TurboEAClient, "post", AsyncMock(side_effect=_post)),
         ):
             out = await server.import_bpmn(
-                business_process_name="Brand New Process",
+                business_process_name="Order to Cash",
                 bpmn_xml="<bpmn:definitions/>",
                 dry_run=False,
             )
         paths = [p for p, _ in post_calls]
         assert paths == [
-            "/cards/bulk-create",
-            "/bpm/processes/new-bp-id/flow/drafts",
-            "/bpm/processes/new-bp-id/flow/versions/draft-1/submit",
-            "/bpm/processes/new-bp-id/flow/versions/draft-1/approve",
+            "/bpm/processes/bp-1/flow/drafts",
+            "/bpm/processes/bp-1/flow/versions/draft-1/submit",
+            "/bpm/processes/bp-1/flow/versions/draft-1/approve",
         ]
         data = _parse(out)
         assert data["committed"] is True
         assert data["workflow_state"] == "published"
         assert data["draft_id"] == "draft-1"
         assert data["verify_urls"]["flow_published"] == (
-            "/api/v1/bpm/processes/new-bp-id/flow/published"
+            "/api/v1/bpm/processes/bp-1/flow/published"
         )
 
     @pytest.mark.asyncio

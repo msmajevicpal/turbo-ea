@@ -5,38 +5,32 @@ All notable changes to Turbo EA are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [1.30.0] - 2026-05-23
-
-### Added
-- **MCP rollback tool.** New `rollback_batch(batch_id, dry_run=True, force=False)` MCP tool walks the events emitted under a mutation batch in reverse order and applies the inverse of each one (delete created cards, restore updated field values from the `card.updated` event's old/new diff, undo archive/restore, delete created relations). The rollback is itself recorded as a new batch (`tool_name=rollback_batch`) referencing the original via `summary.reverses_batch_id`, so the audit log shows the full causal chain. Refuses with a structured `rollback_conflict` (and `conflicting_batches[]` list) when any later batch modified one of the same entities; pass `force=True` (requires `admin.events`) to override and accept the data loss. Backed by `POST /api/v1/mutation-batches/{id}/rollback` and a new `rollback_service.py`. Coverage is intentionally scoped: card create/update/archive/restore and relation create/upsert are reversed automatically; ADR / risk / SoAW / comment / stakeholder writes surface in the dry-run plan under `unsupported_events` so the agent knows what will not be touched.
-- **Eleven new MCP write tools.**
-  - `update_cards_bulk(updates, strict_attributes=False, dry_run=True)` — field-level patches across many cards; backend `PATCH /cards/bulk` now supports `dry_run` and returns a per-row before/after diff. Different patches across rows are auto-grouped and dispatched as sub-calls inside one mutation batch.
-  - `archive_cards(card_ids, reason, child_strategy, cascade_all_related, dry_run=True)` — soft-delete one or many cards. Dry-run aggregates per-card archive-impact (orphan relations, cascaded children, related cards) so the user can review the blast radius before committing.
-  - `create_adr(title, sections, status, linked_card_ids, related_adr_ids, dry_run=True)`, `update_adr(adr_id, …, dry_run=True)`, `sign_adr(adr_id, comment)` — ADR write surface. `sign_adr` follows the S8 graceful-degradation pattern: when the caller lacks `adr.sign`, returns a `pending` response with `deep_link: /ea-delivery/adr/{id}?action=sign` so a human can finish in the UI.
-  - `transition_card_lifecycle(card_id, target, effective_date)` — single tool dispatches approval actions (`approve`/`reject`/`reset`), lifecycle phases (`phaseIn`/`active`/`phaseOut`/`endOfLife`), or status values. Falls back to a `pending` deep-link to `/cards/{id}?tab=approval` when the caller can't approve.
-  - `create_risks(risks, dry_run=True)` and `update_risks(updates, dry_run=True)` — EA Risk Register write surface, includes M:N `linked_card_ids` plumbing through `POST /risks/{id}/cards`.
-  - `add_card_comment(card_id, body, parent_id)` — agent-attributable note; bodies are flagged as untrusted content on later read-back.
-  - `analyze_impact(card_id, direction, max_depth≤3, relation_types, include_types)` — multi-hop graph traversal returning `nodes_by_depth` over the existing `/reports/dependencies` BFS, with directional and type filters applied in-tool.
-  - `create_soaw(initiative_id, title, sections, status, dry_run=True)` — Statement of Architecture Work create.
-  - `assign_stakeholders(operations, dry_run=True)` — bulk add/remove stakeholder role assignments fanned out over `POST /cards/{id}/stakeholders` and `DELETE /stakeholders/{id}`.
-  - `list_diagrams(card_id?)`, `get_diagram(diagram_id)`, `update_diagram(…, dry_run=True)` — diagram read/update surface (creation already existed).
-- **Strict attribute mode (S5).** `CardCreate` and `CardUpdate` (and `PATCH /cards/bulk`) accept a `strict_attributes: bool = False`. When true, `attributes` keys absent from the type's `fields_schema` are rejected with a 422 listing the unknown keys and the valid set for that card type — so an LLM that hallucinates a field name surfaces an actionable error instead of silently writing data that never renders in the UI.
-- **Deep-link handlers (S8) on three editor pages.** `ADREditor`, `SoAWEditor`, and `RiskDetailPage` now read a query-param hint (`?action=sign|reject` for ADR/SoAW, `?task=...#occurrence-...` for risk-detail) and auto-open the matching dialog or scroll to the named anchor. Mirrors the existing pattern on `CardDetail` and is consumed (cleared) after read so a refresh doesn't re-trigger.
-
-### Changed
-- **`PATCH /cards/bulk` accepts `dry_run`** and returns a per-row before/after diff when `dry_run=True`; the savepoint pattern matches `POST /cards/bulk-create`. Response shape stays a list on the commit path for backwards compatibility.
-
 ## [1.29.0] - 2026-05-23
 
 ### Added
-- **MCP audit-batch foundation.** Every MCP write tool now opens a *mutation batch* before any writes happen, stamps the batch id onto every audit event emitted under it, and commits the batch on success — so admins can reconstruct exactly what a single AI-agent call changed from a single id. New `mutation_batches` table + `events.batch_id` column; new endpoints `POST /api/v1/mutation-batches`, `POST /api/v1/mutation-batches/{id}/commit`, `GET /api/v1/mutation-batches`, `GET /api/v1/mutation-batches/{id}`, and `GET /api/v1/mutation-batches/{id}/events`. Permission-gated by the existing `admin.events` for cross-actor reads; batch owners can read their own.
-- **`get_change_history` MCP tool.** Read-only tool that surfaces the new audit endpoint to AI agents — pass a `batch_id` to recover every event under a specific batch, or filter the recent-batch list by `actor_user_id` / `tool_name` / `origin`.
-- **Confirm-token gate for large MCP commits.** A `dry_run=True` batch above the per-call confirmation threshold (`MCP_BATCH_CONFIRMATION_THRESHOLD`, default 20 rows) issues a short-lived `confirm_token`; the matching commit call must echo it back. Backed by a 15-minute TTL so stale dry-runs cannot be replayed. The MCP wrapper enforces this at the agent-facing edge (configurable via `MCP_REQUIRE_DRYRUN_FIRST`, default on); the backend `/mutation-batches/{id}/commit` endpoint enforces the same gate independently.
-- **MCP tool annotations on every tool.** All 31 MCP tools (25 reads + 1 audit + 5 writes — and the new `get_change_history`) now declare `readOnlyHint` / `destructiveHint` / `idempotentHint` so MCP clients (Claude Desktop, Inspector) can surface destructiveness in their UI.
+- **AI agents can now safely write to your EA inventory at scale, with full undo.** The MCP server gains a complete audit + safety stack so an AI assistant (Claude Desktop, custom connector) can act on the IT landscape without becoming a liability:
+  - Every write opens a **mutation batch** — a stable audit handle that ties together every card, relation, comment, diagram, ADR, risk and stakeholder change a single AI call made. Admins (and the agent itself, via the new `get_change_history` tool) can reconstruct the full per-event diff of a commit from one id.
+  - Large commits (>20 rows by default) require a **confirmation token** issued by the prior dry-run. The agent must show you the preview, you decide whether to commit, then the token is echoed back. The token expires after 15 minutes so a stale preview cannot be replayed silently hours later.
+  - **One-click rollback.** A new `rollback_batch` tool reverses an entire batch — deleted cards come back, updated fields restore their old values, created relations are removed. Refuses if a later batch touched the same entities (with a clear conflict list); admins can `force=true` to override. The rollback is itself audited, so the timeline shows the full causal chain rather than erasing history.
+  - **Stricter writes optional.** AI tools can ask the backend to reject unknown attribute keys instead of silently storing them, so an LLM that hallucinates a field name surfaces an actionable error with the valid key list instead of writing data that never renders in the UI.
+- **Eleven new things AI assistants can do on your behalf** (all default to a dry-run preview):
+  - **Update many cards in one call** with a clear before/after diff per row.
+  - **Archive cards (soft delete)** with a per-card cascade preview so you can see the blast radius (orphaned relations, cascaded children) before committing. Hard delete is intentionally not exposed.
+  - **Create / update / sign Architecture Decision Records.**
+  - **Create / update Risk Register entries**, optionally linking them to the affected cards.
+  - **Move a card through approval or lifecycle phase** (Draft → Approved, Active → Phasing Out, etc.).
+  - **Post a comment on a card** as a non-destructive way for the agent to leave a reviewable note.
+  - **"What breaks if I retire this app?"** — a new impact-analysis tool walks the relation graph up to three hops out and returns the dependent apps, interfaces, data objects and processes grouped by depth.
+  - **Create Statement of Architecture Work** documents.
+  - **Assign or remove stakeholders** in bulk.
+  - **List, view and update DrawIO diagrams.**
+- **Graceful "click to finish" workflow for restricted actions.** When an AI assistant tries to sign an ADR, approve a card, or sign a SoAW but the user it's acting as doesn't have permission, the tool no longer errors. Instead it returns a deep-link to the right Turbo EA page (`/ea-delivery/adr/{id}?action=sign`, `/cards/{id}?tab=approval`, `/ea-delivery/soaw/{id}?action=sign`) where a single click opens the matching dialog ready to sign — exactly mirroring the existing draft → submit → approve pattern used for BPMN diagrams.
+- **`PATCH /cards/bulk` now supports `dry_run`** and returns a per-row before/after diff (mirrors the existing `POST /cards/bulk-create` behaviour). Used by the new `update_cards_bulk` MCP tool but also available to anyone calling the REST API directly.
+- **Audit trail picks up two new signals.** Every event in the audit log can now be filtered by **batch id** (which call changed this?) and **origin** (`mcp` / `web` / `api`) so admins can see, at a glance, which writes came from an AI agent vs the web UI vs a direct API integration. Available via `GET /api/v1/mutation-batches`.
 
 ### Changed
-- **`event_bus.publish` accepts an optional `batch_id`** and reads a new `request_batch_id` contextvar populated by the existing origin-tracking middleware from the `X-Turbo-EA-Batch` header. Pre-existing publish call sites are unchanged — the contextvar carries the batch id transparently when an MCP wrapper opened one.
-- **`X-Turbo-EA-Batch` header** is now whitelisted on the CORS configuration and mirrored into the audit log payload through the same middleware as `X-Turbo-EA-Origin`.
+- **MCP tool annotations.** All 47 MCP tools now declare whether they're read-only, destructive, or idempotent. MCP clients (Claude Desktop, Inspector, custom UIs) use these hints to surface destructive actions with appropriate UI treatment.
+- **Three new env vars** (all optional, sensible defaults): `MCP_BATCH_CONFIRMATION_THRESHOLD` (default 20), `MCP_REQUIRE_DRYRUN_FIRST` (default true), and the existing `MCP_WRITES_ENABLED` kill switch now disables all 16 write tools (was 5).
 
 ## [1.28.0] - 2026-05-23
 

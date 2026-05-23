@@ -1,4 +1,4 @@
-"""Turbo EA MCP Server — provides read-only AI tool access to EA data.
+"""Turbo EA MCP Server — provides AI tool access to EA data.
 
 Run: python -m turbo_ea_mcp.server --host 0.0.0.0 --port 8001
 """
@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import re
 import textwrap
 from urllib.parse import urlparse
 
@@ -20,8 +21,12 @@ from turbo_ea_mcp import oauth
 from turbo_ea_mcp.api_client import TurboEAClient
 from turbo_ea_mcp.config import (
     APP_VERSION,
+    MCP_ALLOW_RELATION_DELETE,
+    MCP_MAX_CARDS_PER_CALL,
+    MCP_MAX_RELATIONS_PER_CALL,
     MCP_PORT,
     MCP_PUBLIC_URL,
+    MCP_WRITES_ENABLED,
     TURBO_EA_PUBLIC_URL,
 )
 
@@ -62,9 +67,20 @@ mcp = FastMCP(
     "Turbo EA",
     instructions=textwrap.dedent("""\
         Turbo EA is an Enterprise Architecture management platform.
-        Use the available tools to query the IT landscape data.
+        Use the read tools (search_cards, get_card, list_card_types, …) to
+        query the IT landscape and the write tools (create_cards_bulk,
+        upsert_relations_bulk, create_diagram, import_bpmn, resolve_card_refs)
+        to turn artifacts the user has shared with you (spreadsheets, BPMN
+        XML, DrawIO XML, documents) into cards, relations and diagrams.
+
+        Write tools default to dry_run=True: they validate and return a
+        preview without persisting. Surface the preview to the user, then
+        call again with dry_run=False to commit. Always call list_card_types
+        and get_relation_types first to make sure the data you propose fits
+        the existing metamodel — the backend will reject unknown types and
+        invalid source/target combinations.
+
         All data access respects the authenticated user's permissions.
-        Data is read-only — you cannot create or modify cards.
     """),
     transport_security=_build_transport_security(),
 )
@@ -602,6 +618,494 @@ async def get_card_documents(card_id: str) -> str:
     client = TurboEAClient(token)
     data = await client.get(f"/cards/{card_id}/documents")
     return _fmt(data)
+
+
+# ── Write tools (artifact import) ───────────────────────────────────────────
+#
+# These tools turn artifacts the calling agent has parsed (Excel rows, BPMN
+# XML, DrawIO XML, structured data extracted from documents) into cards,
+# relations and diagrams. They default to dry_run=True so the agent can show
+# the user a preview before persisting.
+
+
+# Regex mirror of `_CARD_ID_RE` in backend/app/api/v1/diagrams.py — used to
+# preview which existing cards a DrawIO XML payload would link.
+_DRAWIO_CARD_ID_RE = re.compile(r'cardId="([0-9a-fA-F-]{36})"')
+
+
+
+def _writes_disabled_message() -> str | None:
+    """Return a user-facing error when MCP writes are disabled, else None.
+
+    The kill switch (`MCP_WRITES_ENABLED=false`) lets an operator put the
+    server into read-only mode without a code redeploy.
+    """
+    if MCP_WRITES_ENABLED:
+        return None
+    return _fmt(
+        {
+            "error": "writes_disabled",
+            "message": (
+                "MCP writes are disabled on this deployment "
+                "(MCP_WRITES_ENABLED=false). Read tools remain available."
+            ),
+        }
+    )
+
+
+@mcp.tool()
+async def create_cards_bulk(cards: list[dict], dry_run: bool = True) -> str:
+    """Create many cards in one call from artifact-extracted rows.
+
+    The calling agent is expected to read the source artifact (spreadsheet,
+    document, image) itself, extract structured rows, and call this tool.
+    Use list_card_types first to learn which `type` keys and `attributes`
+    fit the metamodel — unknown types are rejected by the backend.
+
+    Args:
+        cards: List of row dicts. Each dict mirrors `CardBulkCreateItem`:
+            - `row_index` (int, required): a stable index so the response
+              can be paired back to the source row.
+            - `type` (str, required): card type key (e.g. "Application",
+              "BusinessCapability"). Must exist in the metamodel.
+            - `name` (str, required): human-readable name.
+            - `subtype` (str, optional): subtype key from the type's
+              `subtypes` list.
+            - `description` (str, optional).
+            - `parent_id` (UUID string, optional): existing parent UUID.
+            - `parent_name` + `parent_path` (str + list[str], optional):
+              reference an existing or same-batch parent by name. The
+              backend topologically sorts so a parent row earlier in the
+              batch can be referenced by a child row later in the batch.
+            - `attributes` (dict, optional): metamodel fields keyed by field
+              key. Unknown keys are accepted (stored as JSONB) but won't
+              show in the UI — match the type's `fields_schema`.
+            - `lifecycle` (dict, optional): `{phase, start_date, end_date}`.
+            - `external_id`, `alias`, `approval_status` (str, optional).
+            Single-row imports work too — pass a 1-item list.
+        dry_run: When True (default), validate every row and return the
+            preview without persisting. The agent should show the result
+            to the user and only call again with dry_run=False to commit.
+
+    Returns: JSON with `results[]` (per-row status/id/error), `created`,
+    `failed`, and `dry_run`.
+    """
+    token = await _get_current_token()
+    if not token:
+        return "Error: Not authenticated. Please reconnect."
+    if (disabled := _writes_disabled_message()) is not None:
+        return disabled
+    if len(cards) > MCP_MAX_CARDS_PER_CALL:
+        return _fmt(
+            {
+                "error": "batch_too_large",
+                "message": (
+                    f"This batch has {len(cards)} cards but the MCP per-call "
+                    f"cap is {MCP_MAX_CARDS_PER_CALL}. Split the upload into "
+                    "smaller batches so the user can review each dry-run."
+                ),
+                "cap": MCP_MAX_CARDS_PER_CALL,
+                "received": len(cards),
+            }
+        )
+    client = TurboEAClient(token)
+    data = await client.post(
+        "/cards/bulk-create",
+        json={"cards": cards, "dry_run": dry_run},
+    )
+    return _fmt(data)
+
+
+@mcp.tool()
+async def resolve_card_refs(refs: list[dict]) -> str:
+    """Pre-validate name-based card references before a bulk import.
+
+    Useful when the artifact references existing cards by name (parent
+    chains in spreadsheets, source/target columns in a relation sheet)
+    and the agent wants to surface ambiguous or missing refs to the user
+    before committing.
+
+    Args:
+        refs: List of reference dicts. Each dict mirrors `CardRefInput`:
+            - `row` (int): source row.
+            - `column` (str): source column label.
+            - `type` (str): the expected card type for the lookup.
+            - `ref` (str): the human-typed reference. A simple name
+              ("NexaCore ERP") or a `/`-separated path
+              ("Sales / Customer Mgmt / CRM").
+
+    Returns: JSON with one result per ref — `resolved` (with `id`),
+    `ambiguous` (with up to 3 `candidates`), or `missing`.
+    """
+    token = await _get_current_token()
+    if not token:
+        return "Error: Not authenticated. Please reconnect."
+    client = TurboEAClient(token)
+    data = await client.post("/cards/resolve-refs", json={"refs": refs})
+    return _fmt(data)
+
+
+@mcp.tool()
+async def upsert_relations_bulk(
+    operations: list[dict],
+    dry_run: bool = True,
+) -> str:
+    """Create or delete many relations between cards in one call.
+
+    Call get_relation_types first to see which relation type keys exist
+    and which source/target card types each one connects — the backend
+    rejects relations whose source or target types don't match the
+    metamodel definition.
+
+    Args:
+        operations: List of operation dicts. Each dict mirrors
+            `RelationBulkOperation`:
+            - `row_index` (int): stable source row index.
+            - `action` (str, optional): "upsert" (default) or "delete".
+            - `type` (str): relation type key (e.g. "uses",
+              "implementedBy"). Must exist in the metamodel.
+            - `source` (dict): either `{"id": "<uuid>"}` or
+              `{"type": "...", "name": "...", "parent_path": [...]}`.
+            - `target` (dict): same shape as `source`.
+            - `attributes` (dict, optional).
+            - `description` (str, optional).
+        dry_run: When True (default), validate every op and return the
+            preview without persisting. Call again with dry_run=False to
+            commit.
+
+    Returns: JSON with `results[]`, `upserted`, `deleted`, `failed` and
+    `dry_run`.
+    """
+    token = await _get_current_token()
+    if not token:
+        return "Error: Not authenticated. Please reconnect."
+    if (disabled := _writes_disabled_message()) is not None:
+        return disabled
+    if len(operations) > MCP_MAX_RELATIONS_PER_CALL:
+        return _fmt(
+            {
+                "error": "batch_too_large",
+                "message": (
+                    f"This batch has {len(operations)} relation operations "
+                    f"but the MCP per-call cap is {MCP_MAX_RELATIONS_PER_CALL}. "
+                    "Split into smaller batches."
+                ),
+                "cap": MCP_MAX_RELATIONS_PER_CALL,
+                "received": len(operations),
+            }
+        )
+    if not MCP_ALLOW_RELATION_DELETE:
+        delete_rows = [
+            op.get("row_index") for op in operations if op.get("action") == "delete"
+        ]
+        if delete_rows:
+            return _fmt(
+                {
+                    "error": "delete_action_disabled",
+                    "message": (
+                        "Relation deletion via MCP is disabled. Remove "
+                        "relations from the web UI for an explicit audit "
+                        "trail, or set MCP_ALLOW_RELATION_DELETE=true on the "
+                        "deployment if the operator wants to opt in."
+                    ),
+                    "rejected_rows": delete_rows,
+                }
+            )
+    client = TurboEAClient(token)
+    data = await client.post(
+        "/relations/bulk",
+        json={"operations": operations, "dry_run": dry_run},
+    )
+    return _fmt(data)
+
+
+@mcp.tool()
+async def create_diagram(
+    name: str,
+    drawio_xml: str,
+    description: str = "",
+    linked_card_ids: list[str] | None = None,
+    dry_run: bool = True,
+) -> str:
+    """Create a free-form DrawIO diagram, optionally linked to cards.
+
+    The agent is expected to provide complete DrawIO XML. Card references
+    embedded as `cardId="<uuid>"` attributes on `<object>` elements are
+    extracted by the backend and surface as visual links from the diagram
+    to those cards; `linked_card_ids` separately drives the
+    "what diagrams reference this card?" lookup. Pass both when both
+    apply (typical: agent already added the cardId attributes inside the
+    XML and lists the same UUIDs in linked_card_ids).
+
+    Args:
+        name: Diagram name.
+        drawio_xml: DrawIO mxGraph XML.
+        description: Optional description.
+        linked_card_ids: Optional list of card UUIDs to link to this
+            diagram (M:N).
+        dry_run: When True (default), validate client-side (scan the XML
+            for cardId refs, echo the inputs) without calling the backend.
+            Call again with dry_run=False to actually create the diagram.
+
+    Returns: JSON with either the dry-run preview (extracted_card_refs
+    from the XML, linked_card_ids echoed back) or the created diagram.
+    """
+    token = await _get_current_token()
+    if not token:
+        return "Error: Not authenticated. Please reconnect."
+    if (disabled := _writes_disabled_message()) is not None:
+        return disabled
+    linked_card_ids = list(linked_card_ids or [])
+    extracted_refs = list(dict.fromkeys(_DRAWIO_CARD_ID_RE.findall(drawio_xml)))
+    if dry_run:
+        # Client-side preview only — no backend round-trip. The agent
+        # surfaces this to the user; on confirmation, we'll commit.
+        preview = {
+            "dry_run": True,
+            "would_create": {
+                "name": name,
+                "description": description,
+                "type": "free_draw",
+                "linked_card_ids": linked_card_ids,
+                "extracted_card_refs_from_xml": extracted_refs,
+            },
+            "note": (
+                "Card IDs are not verified in dry-run mode; the backend "
+                "will reject unknown UUIDs on commit. Re-run with "
+                "dry_run=False to create the diagram."
+            ),
+        }
+        return _fmt(preview)
+    client = TurboEAClient(token)
+    payload: dict = {
+        "name": name,
+        "description": description or None,
+        "type": "free_draw",
+        "data": {"xml": drawio_xml},
+        "card_ids": linked_card_ids,
+    }
+    data = await client.post("/diagrams", json=payload)
+    return _fmt(data)
+
+
+@mcp.tool()
+async def import_bpmn(
+    business_process_name: str,
+    bpmn_xml: str,
+    parent_card: str | None = None,
+    svg_thumbnail: str = "",
+    dry_run: bool = True,
+) -> str:
+    """Save a BPMN 2.0 diagram against an existing BusinessProcess card.
+
+    This tool deliberately does **not** create cards. If the named
+    BusinessProcess card does not exist yet, the tool returns a
+    `card_not_found` error and asks you to create it first with
+    `create_cards_bulk` — populated with the right description, subtype
+    (`category` / `group` / `process` / `variant`), attributes
+    (`processType`, `maturity`, `automationLevel`, …), and parent
+    hierarchy. Splitting the steps keeps card metadata out of the BPMN
+    flow path and forces a deliberate "set up the card properly, then
+    attach the diagram" sequence.
+
+    The diagram is saved via the draft → submit → approve workflow so it
+    lands in the `published` flow that the Process Flow tab actually
+    renders. The approve step extracts ProcessElement rows from the BPMN
+    for the EA cross-reference panel. If the caller has `bpm.edit` but
+    not `card.approval_status` (i.e. not a process owner / admin /
+    bpm_admin), the tool stops at `pending` and surfaces a warning with
+    the URL to approve from the UI.
+
+    Args:
+        business_process_name: Name of an existing BusinessProcess card.
+            Must match exactly (whitespace-trimmed, case-sensitive).
+        bpmn_xml: BPMN 2.0 XML. Stored verbatim — the backend never
+            rewrites the BPMNDI plane or the Collaboration/Participant
+            metadata.
+        parent_card: Optional parent BusinessProcess card name used
+            **only** to disambiguate when multiple cards share the same
+            name. Not used to create anything.
+        svg_thumbnail: Optional SVG snapshot of the diagram.
+        dry_run: When True (default), validate the existing-card lookup
+            and return a flow-node count preview without persisting the
+            diagram. Call again with `dry_run=False` to walk the
+            draft → submit → approve workflow.
+    """
+    token = await _get_current_token()
+    if not token:
+        return "Error: Not authenticated. Please reconnect."
+    if (disabled := _writes_disabled_message()) is not None:
+        return disabled
+    client = TurboEAClient(token)
+
+    # Step 1: find an existing BusinessProcess card by name.
+    search = await client.get(
+        "/cards",
+        params={
+            "type": "BusinessProcess",
+            "search": business_process_name,
+            "page_size": 25,
+        },
+    )
+    candidates = search.get("items", []) if isinstance(search, dict) else []
+    exact = [
+        c for c in candidates if c.get("name", "").strip() == business_process_name.strip()
+    ]
+    if len(exact) > 1:
+        # Multi-match: refuse to write. The agent must qualify.
+        return _fmt(
+            {
+                "error": "ambiguous_business_process",
+                "message": (
+                    f"Multiple BusinessProcess cards match '{business_process_name}'. "
+                    "Re-call with `parent_card` to disambiguate."
+                ),
+                "candidates": [
+                    {"id": c.get("id"), "name": c.get("name"), "parent_id": c.get("parent_id")}
+                    for c in exact
+                ],
+            }
+        )
+
+    process_id: str | None = exact[0].get("id") if exact else None
+
+    if process_id is None:
+        # Card doesn't exist — refuse to create one. The tool is
+        # deliberately single-purpose ("save BPMN against existing card")
+        # so cards always go through the full create_cards_bulk path
+        # where the agent populates description, subtype, attributes
+        # and parent properly. Without this guard the agent takes the
+        # one-call shortcut and the card lands sparse.
+        return _fmt(
+            {
+                "error": "card_not_found",
+                "business_process_name": business_process_name,
+                "next_action": (
+                    f"No BusinessProcess card named '{business_process_name}' "
+                    "exists. Create it first via create_cards_bulk with "
+                    "type='BusinessProcess' — populate description, "
+                    "subtype (one of: category / group / process / variant), "
+                    "attributes (processType, maturity, automationLevel, …), "
+                    "and parent hierarchy as needed. Then re-call "
+                    "import_bpmn with the same business_process_name."
+                ),
+            }
+        )
+
+    # Step 3: persist the diagram via the flow-version workflow. The card
+    # detail's Process Flow tab reads from
+    #   GET /bpm/processes/{id}/flow/published
+    # not the legacy `/diagram` endpoint, so to land a renderable diagram
+    # we have to walk it through draft -> pending -> published. The
+    # approve step also extracts ProcessElement rows for EA cross-ref.
+    #
+    # Dry-run shortcut: the flow endpoints don't have a dry_run flag and
+    # we don't want to fake one. The card-create step above already
+    # validated the card path; for the flow side, we surface the parsed
+    # element count via a parser-free regex count of <bpmn:*Task /
+    # *Event / *Gateway> so the agent can show the user something useful.
+    if dry_run:
+        preview_node_count = len(
+            re.findall(
+                r"<\w+:(?:task|userTask|serviceTask|scriptTask|businessRuleTask|"
+                r"sendTask|receiveTask|manualTask|callActivity|subProcess|"
+                r"exclusiveGateway|parallelGateway|inclusiveGateway|"
+                r"eventBasedGateway|startEvent|endEvent|"
+                r"intermediateCatchEvent|intermediateThrowEvent|boundaryEvent)\b",
+                bpmn_xml,
+            )
+        )
+        response: dict = {
+            "dry_run": True,
+            "committed": False,
+            "business_process_id": process_id,
+            "diagram_preview": {
+                "flow_nodes_estimated": preview_node_count,
+                "bpmn_xml_bytes": len(bpmn_xml),
+            },
+            "next_action": (
+                "NOTHING HAS BEEN PERSISTED YET. Surface this preview to "
+                "the user; on their confirmation, re-call import_bpmn "
+                "with dry_run=False to create a draft, submit it, and "
+                "publish it as the active process flow."
+            ),
+        }
+        return _fmt(response)
+
+    # --- Commit path: draft -> submit -> approve ---
+    draft = await client.post(
+        f"/bpm/processes/{process_id}/flow/drafts",
+        json={"bpmn_xml": bpmn_xml, "svg_thumbnail": svg_thumbnail or None},
+    )
+    draft_id = draft.get("id") if isinstance(draft, dict) else None
+    if not draft_id:
+        return _fmt(
+            {
+                "error": "draft_create_failed",
+                "draft_response": draft,
+            }
+        )
+
+    workflow_state = "draft"
+    submit_result: dict | list | None = None
+    approve_result: dict | list | None = None
+    publish_warning: str | None = None
+    try:
+        submit_result = await client.post(
+            f"/bpm/processes/{process_id}/flow/versions/{draft_id}/submit",
+            json={},
+        )
+        workflow_state = "pending"
+        try:
+            approve_result = await client.post(
+                f"/bpm/processes/{process_id}/flow/versions/{draft_id}/approve",
+                json={},
+            )
+            workflow_state = "published"
+        except Exception as exc:  # noqa: BLE001 — surface verbatim
+            publish_warning = (
+                "Diagram submitted for approval but the user does not have "
+                "permission to publish it (requires the process_owner "
+                "stakeholder role, admin, or bpm_admin). The pending "
+                f"draft is visible at /cards/{process_id} under "
+                f"Process Flow → Drafts. Approve from there to publish. "
+                f"(Error: {exc})"
+            )
+    except Exception as exc:  # noqa: BLE001
+        publish_warning = (
+            "Draft created but could not be submitted for approval. "
+            f"It is editable at /cards/{process_id}. (Error: {exc})"
+        )
+
+    response = {
+        "dry_run": False,
+        "committed": True,
+        "business_process_id": process_id,
+        "workflow_state": workflow_state,
+        "draft_id": draft_id,
+        "submit_result": submit_result,
+        "approve_result": approve_result,
+        "verify_urls": {
+            # Reads what the editor reads — null until status=published.
+            "flow_published": f"/api/v1/bpm/processes/{process_id}/flow/published",
+            # GET this for the draft view (always available post-create).
+            "flow_draft": (
+                f"/api/v1/bpm/processes/{process_id}/flow/versions/{draft_id}"
+            ),
+            # Open in browser — Process Flow tab.
+            "card_detail": f"/cards/{process_id}",
+        },
+        "rendering_note": (
+            "The Process Flow tab in the card detail reads from the "
+            "/flow/published endpoint. If `workflow_state` is "
+            "'published' the diagram should render; if it's 'pending' "
+            "or 'draft', open the card and approve from the Drafts "
+            "sub-tab to make it the published flow."
+        ),
+    }
+    if publish_warning:
+        response["warning"] = publish_warning
+    return _fmt(response)
 
 
 # ── Resources ───────────────────────────────────────────────────────────────

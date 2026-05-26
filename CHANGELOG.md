@@ -5,6 +5,11 @@ All notable changes to Turbo EA are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.30.1] - 2026-05-26
+
+### Fixed
+- **Custom select-field options now show the label, not the key.** When an admin added a new `single_select` or `multiple_select` field via the metamodel admin UI, the rendered chips on cards, in the inventory grid, in the inventory filter sidebar, on the create-card dialog, on public web portals, and in survey responses all displayed the option's internal `key` instead of the user-entered `label`. The shared `useResolveLabel` helper was being called with `opt.key` as the fallback, but admin-created options carry no `translations` map — so the fallback was always returned. Every render site now uses `opt.label || opt.key` as the fallback. The inventory grid additionally gained a `cellRenderer` for `multiple_select` columns, which used to fall through to the default value-getter and render the raw array of keys. Fixes [#611](https://github.com/vincentmakes/turbo-ea/issues/611).
+
 ## [1.30.0] - 2026-05-26
 
 ### Added

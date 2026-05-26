@@ -166,7 +166,7 @@ export function FieldValue({
     const strVal = typeof value === "string" ? value : safeString(value);
     const opt = field.options.find((o) => o.key === strVal);
     return opt ? (
-      <Chip size="small" label={rl(opt.key, opt.translations)} sx={{ ...SELECT_CHIP_BASE, width: w, ...(opt.color ? { bgcolor: opt.color, color: "#fff" } : {}) }} />
+      <Chip size="small" label={rl(opt.label || opt.key, opt.translations)} sx={{ ...SELECT_CHIP_BASE, width: w, ...(opt.color ? { bgcolor: opt.color, color: "#fff" } : {}) }} />
     ) : (
       <Tooltip title={t("utils.unknownOption", { key: strVal })}>
         <Chip size="small" label={strVal} variant="outlined" color="warning" sx={{ ...SELECT_CHIP_BASE, width: w }} />
@@ -183,7 +183,7 @@ export function FieldValue({
           const key = typeof v === "string" ? v : safeString(v);
           const opt = field.options!.find((o) => o.key === key);
           return opt ? (
-            <Chip key={key + i} size="small" label={rl(opt.key, opt.translations)} sx={{ ...SELECT_CHIP_BASE, width: w, ...(opt.color ? { bgcolor: opt.color, color: "#fff" } : {}) }} />
+            <Chip key={key + i} size="small" label={rl(opt.label || opt.key, opt.translations)} sx={{ ...SELECT_CHIP_BASE, width: w, ...(opt.color ? { bgcolor: opt.color, color: "#fff" } : {}) }} />
           ) : (
             <Chip key={key + i} size="small" label={key} variant="outlined" color="warning" sx={{ ...SELECT_CHIP_BASE, width: w }} />
           );
@@ -285,7 +285,7 @@ export function FieldEditor({
                       }}
                     />
                   )}
-                  {rl(opt.key, opt.translations)}
+                  {rl(opt.label || opt.key, opt.translations)}
                 </Box>
               </MenuItem>
             ))}
@@ -309,7 +309,7 @@ export function FieldEditor({
               <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
                 {(selected as string[]).map((key) => {
                   const opt = field.options?.find((o) => o.key === key);
-                  return <Chip key={key} size="small" label={opt ? rl(opt.key, opt.translations) : key} sx={{ height: 22 }} />;
+                  return <Chip key={key} size="small" label={opt ? rl(opt.label || opt.key, opt.translations) : key} sx={{ height: 22 }} />;
                 })}
               </Box>
             )}
@@ -320,7 +320,7 @@ export function FieldEditor({
                   {opt.color && (
                     <Box sx={{ width: 10, height: 10, borderRadius: "50%", bgcolor: opt.color }} />
                   )}
-                  {rl(opt.key, opt.translations)}
+                  {rl(opt.label || opt.key, opt.translations)}
                 </Box>
               </MenuItem>
             ))}

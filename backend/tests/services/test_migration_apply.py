@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.services.migration.apply import _topo_sort
+from app.services.migration.apply import _remap_attributes, _topo_sort
 
 
 @dataclass
@@ -54,3 +54,36 @@ def test_topo_sort_preserves_arrival_order_among_siblings() -> None:
     assert order.index("a") < order.index("c")
     assert order.index("b") < order.index("d")
     assert order.index("a") < order.index("b")
+
+
+def test_remap_attributes_passes_unmapped_keys_through() -> None:
+    out = _remap_attributes(
+        {"criticality": "high", "vendorName": "Acme"},
+        {"criticality": "businessCriticality"},
+    )
+    assert out == {"businessCriticality": "high", "vendorName": "Acme"}
+
+
+def test_remap_attributes_drops_skip_targets() -> None:
+    out = _remap_attributes(
+        {"criticality": "high", "noise": "ignore me"},
+        {"noise": "__skip__"},
+    )
+    assert out == {"criticality": "high"}
+
+
+def test_remap_attributes_empty_mapping_is_identity() -> None:
+    src = {"a": 1, "b": "x"}
+    assert _remap_attributes(src, {}) == src
+
+
+def test_remap_attributes_collision_last_write_wins() -> None:
+    # Two source keys mapped onto the same TEA key — Python dict
+    # iteration order makes the *later* one win, which matches the
+    # docstring contract. We don't promise which one, but we promise
+    # the dict ends up with exactly one entry under the target key.
+    out = _remap_attributes(
+        {"a": 1, "b": 2},
+        {"a": "merged", "b": "merged"},
+    )
+    assert list(out.keys()) == ["merged"]

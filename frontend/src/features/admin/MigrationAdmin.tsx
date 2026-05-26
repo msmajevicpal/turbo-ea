@@ -57,11 +57,40 @@ interface Migration {
   snapshot_version: string | null;
   stats: Record<string, unknown> | null;
   metamodel_diff: Record<string, unknown> | null;
+  field_mappings: Record<string, Record<string, string>> | null;
   error_message: string | null;
   parsed_at: string | null;
   applied_at: string | null;
   created_at: string | null;
   updated_at: string | null;
+}
+
+interface FieldMappingTargetOption {
+  key: string;
+  label: string;
+  type: string;
+  section: string | null;
+}
+
+interface FieldMappingSourceRow {
+  source_field_key: string;
+  label: string | null;
+  native_data_type: string | null;
+  tea_type: string | null;
+  target_tea_type: string;
+  mapped_to: string | null;
+}
+
+interface FieldMappingBlock {
+  native_type: string;
+  target_tea_type: string;
+  target_type_label: string;
+  source_fields: FieldMappingSourceRow[];
+  available_targets: FieldMappingTargetOption[];
+}
+
+interface FieldMappingOptions {
+  blocks: FieldMappingBlock[];
 }
 
 interface StagedRecord {
@@ -156,6 +185,10 @@ export default function MigrationAdmin() {
   const [selected, setSelected] = useState<Migration | null>(null);
   const [previews, setPreviews] = useState<Record<string, PreviewPage | null>>({});
   const [activeKind, setActiveKind] = useState<EntityKind>("card");
+  const [mappingOptions, setMappingOptions] = useState<FieldMappingOptions | null>(null);
+  const [mappingDraft, setMappingDraft] = useState<Record<string, Record<string, string>>>({});
+  const [mappingSaving, setMappingSaving] = useState(false);
+  const [mappingError, setMappingError] = useState<string | null>(null);
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const sourceLabel = useCallback(
@@ -280,15 +313,69 @@ export default function MigrationAdmin() {
     }
   };
 
+  const loadFieldMappings = useCallback(async (m: Migration) => {
+    setMappingError(null);
+    try {
+      const opts = await api.get<FieldMappingOptions>(`/migration/${m.id}/field-mappings`);
+      setMappingOptions(opts);
+      // Seed the editable draft from the server's current mapping +
+      // every source field (default to "" → unmapped).
+      const draft: Record<string, Record<string, string>> = {};
+      for (const block of opts.blocks) {
+        const perType: Record<string, string> = {};
+        for (const row of block.source_fields) {
+          perType[row.source_field_key] = row.mapped_to || "";
+        }
+        draft[block.native_type] = perType;
+      }
+      setMappingDraft(draft);
+    } catch (e) {
+      setMappingError(e instanceof Error ? e.message : String(e));
+    }
+  }, []);
+
+  const handleSaveMappings = async () => {
+    if (!selected) return;
+    setMappingSaving(true);
+    setMappingError(null);
+    try {
+      // Strip empty values — the backend already does this but it keeps
+      // the wire payload small and the round-trip echo predictable.
+      const cleaned: Record<string, Record<string, string>> = {};
+      for (const [nativeType, perType] of Object.entries(mappingDraft)) {
+        const kept = Object.fromEntries(
+          Object.entries(perType).filter(([, v]) => v && v.length > 0),
+        );
+        if (Object.keys(kept).length > 0) cleaned[nativeType] = kept;
+      }
+      const updated = await api.put<Migration>(`/migration/${selected.id}/field-mappings`, {
+        field_mappings: cleaned,
+      });
+      setSelected(updated);
+      setMigrations((prev) => prev.map((row) => (row.id === updated.id ? updated : row)));
+      await loadFieldMappings(updated);
+    } catch (e) {
+      setMappingError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setMappingSaving(false);
+    }
+  };
+
   const handleOpenDetail = async (m: Migration) => {
     setSelected(m);
     setPreviews({});
     setActiveKind("card");
+    setMappingOptions(null);
+    setMappingDraft({});
+    setMappingError(null);
     try {
       const fresh = await Promise.all(
         ENTITY_KIND_ORDER.map(async (kind) => [kind, await fetchPreview(m.id, kind)] as const),
       );
       setPreviews(Object.fromEntries(fresh));
+      if (m.status === "parsed" || m.status === "previewed") {
+        await loadFieldMappings(m);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -558,6 +645,17 @@ export default function MigrationAdmin() {
             </>
           )}
 
+          {selected && (selected.status === "parsed" || selected.status === "previewed") && (
+            <FieldMappingPanel
+              options={mappingOptions}
+              draft={mappingDraft}
+              onChange={setMappingDraft}
+              onSave={handleSaveMappings}
+              saving={mappingSaving}
+              error={mappingError}
+            />
+          )}
+
           <Tabs
             value={activeKind}
             onChange={(_, v) => setActiveKind(v)}
@@ -669,6 +767,186 @@ function StagedTable({ rows }: StagedTableProps) {
         ))}
       </TableBody>
     </Table>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Field mapping panel
+// ---------------------------------------------------------------------------
+
+interface FieldMappingPanelProps {
+  options: FieldMappingOptions | null;
+  draft: Record<string, Record<string, string>>;
+  onChange: (draft: Record<string, Record<string, string>>) => void;
+  onSave: () => void;
+  saving: boolean;
+  error: string | null;
+}
+
+function FieldMappingPanel({
+  options,
+  draft,
+  onChange,
+  onSave,
+  saving,
+  error,
+}: FieldMappingPanelProps) {
+  const { t } = useTranslation(["admin", "common"]);
+
+  // Sentinel "do not import" target — also recognised by the backend.
+  const SKIP_VALUE = "__skip__";
+
+  const setOne = (nativeType: string, fieldKey: string, value: string) => {
+    onChange({
+      ...draft,
+      [nativeType]: { ...(draft[nativeType] || {}), [fieldKey]: value },
+    });
+  };
+
+  if (options === null) {
+    return null;
+  }
+
+  if (options.blocks.length === 0) {
+    return (
+      <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
+        <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
+          {t("migration.mapping.title", "Map imported fields")}
+        </Typography>
+        <Typography variant="body2" color="text.secondary">
+          {t(
+            "migration.mapping.empty",
+            "The snapshot did not contain any custom fields to remap — every field already lands on a built-in Turbo EA column.",
+          )}
+        </Typography>
+      </Paper>
+    );
+  }
+
+  // Dirty if any draft value differs from the server's current mapping.
+  const dirty = options.blocks.some((block) =>
+    block.source_fields.some(
+      (row) =>
+        (draft[block.native_type]?.[row.source_field_key] || "") !== (row.mapped_to || ""),
+    ),
+  );
+
+  return (
+    <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
+      <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
+        <Box>
+          <Typography variant="subtitle2">
+            {t("migration.mapping.title", "Map imported fields")}
+          </Typography>
+          <Typography variant="caption" color="text.secondary">
+            {t(
+              "migration.mapping.help",
+              "Optional. Route a source platform field onto an existing Turbo EA field on the target card type, or skip it entirely. Unmapped fields land as new custom attributes under an “Imported from…” section.",
+            )}
+          </Typography>
+        </Box>
+        <Button
+          size="small"
+          variant="contained"
+          onClick={onSave}
+          disabled={!dirty || saving}
+          startIcon={
+            saving ? <CircularProgress size={14} /> : <MaterialSymbol icon="save" />
+          }
+        >
+          {t("migration.mapping.save", "Save mappings")}
+        </Button>
+      </Stack>
+      {error && (
+        <Alert severity="error" sx={{ mb: 1 }}>
+          {error}
+        </Alert>
+      )}
+
+      {options.blocks.map((block) => (
+        <Box key={`${block.native_type}->${block.target_tea_type}`} sx={{ mb: 1.5 }}>
+          <Typography variant="caption" color="text.secondary">
+            {block.native_type} → {block.target_type_label}
+          </Typography>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell sx={{ width: "40%" }}>
+                  {t("migration.mapping.col.sourceField", "Source field")}
+                </TableCell>
+                <TableCell sx={{ width: "20%" }}>
+                  {t("migration.mapping.col.sourceType", "Source type")}
+                </TableCell>
+                <TableCell sx={{ width: "40%" }}>
+                  {t("migration.mapping.col.target", "Map to Turbo EA field")}
+                </TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {block.source_fields.map((row) => {
+                const value = draft[block.native_type]?.[row.source_field_key] || "";
+                return (
+                  <TableRow key={row.source_field_key} hover>
+                    <TableCell>
+                      <Typography variant="body2">
+                        {row.label || row.source_field_key}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        <code>{row.source_field_key}</code>
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Chip
+                        size="small"
+                        variant="outlined"
+                        label={row.native_data_type || row.tea_type || "—"}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <FormControl fullWidth size="small">
+                        <Select
+                          displayEmpty
+                          value={value}
+                          onChange={(e) =>
+                            setOne(block.native_type, row.source_field_key, String(e.target.value))
+                          }
+                        >
+                          <MenuItem value="">
+                            <em>
+                              {t(
+                                "migration.mapping.option.newCustom",
+                                "(Import as new custom field — default)",
+                              )}
+                            </em>
+                          </MenuItem>
+                          <MenuItem value={SKIP_VALUE}>
+                            <em>
+                              {t("migration.mapping.option.skip", "(Do not import this field)")}
+                            </em>
+                          </MenuItem>
+                          {block.available_targets.map((opt) => (
+                            <MenuItem key={opt.key} value={opt.key}>
+                              {opt.label}
+                              <Typography
+                                variant="caption"
+                                color="text.secondary"
+                                sx={{ ml: 1 }}
+                              >
+                                {opt.section ? `· ${opt.section}` : ""} · {opt.type}
+                              </Typography>
+                            </MenuItem>
+                          ))}
+                        </Select>
+                      </FormControl>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </Box>
+      ))}
+    </Paper>
   );
 }
 

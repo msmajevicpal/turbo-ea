@@ -97,12 +97,33 @@ async def apply_migration(
 # ---------------------------------------------------------------------------
 
 
+def _remap_attributes(
+    attributes: dict[str, Any],
+    mapping: dict[str, str],
+) -> dict[str, Any]:
+    """Rewrite attribute keys using the admin's per-type field mapping.
+
+    Empty string / ``None`` / missing key in the mapping passes through
+    unchanged. The literal ``"__skip__"`` target drops the value (admin
+    explicitly opted out of importing this field). Last-write-wins if
+    two source keys map onto the same TEA key.
+    """
+    out: dict[str, Any] = {}
+    for native_key, value in attributes.items():
+        target = mapping.get(native_key)
+        if target == "__skip__":
+            continue
+        out[target or native_key] = value
+    return out
+
+
 async def _apply_card_pass(
     db: AsyncSession,
     migration: Migration,
     user: User,
 ) -> dict[str, int]:
     counts = {"created": 0, "updated": 0, "skipped": 0, "errors": 0}
+    field_mappings = migration.field_mappings or {}
 
     rows = list(
         (
@@ -149,7 +170,7 @@ async def _apply_card_pass(
             continue
 
         try:
-            await _apply_single_card(db, staged, user)
+            await _apply_single_card(db, staged, user, field_mappings=field_mappings)
             counts["created" if staged.action == "create" else "updated"] += 1
             staged.status = "applied"
         except Exception as exc:  # noqa: BLE001 — collect, don't crash the pass
@@ -166,8 +187,22 @@ async def _apply_single_card(
     db: AsyncSession,
     staged: StagedRecord,
     user: User,
+    field_mappings: dict[str, dict[str, str]] | None = None,
 ) -> None:
     payload = (staged.source_data or {}).get("payload") or {}
+    raw = (staged.source_data or {}).get("raw") or {}
+    native_type = raw.get("type")
+    # Honour the per-migration field mapping: rewrite custom-field keys
+    # (still in their native source names inside ``attributes``) to the
+    # admin's chosen Turbo EA field keys. Unmapped keys pass through
+    # unchanged and land as new custom attributes via the metamodel pass.
+    if field_mappings and native_type:
+        mapping_for_type = field_mappings.get(native_type) or {}
+        if mapping_for_type and payload.get("attributes"):
+            payload = {
+                **payload,
+                "attributes": _remap_attributes(payload["attributes"], mapping_for_type),
+            }
     parent_id = await _resolve_parent_card_id(db, staged)
 
     if staged.action == "create":
@@ -755,6 +790,7 @@ async def _apply_metamodel_field_pass(
     """
     counts = {"created": 0, "updated": 0, "skipped": 0, "errors": 0}
     section_name = f"Imported from {migration.source_type}"
+    field_mappings = migration.field_mappings or {}
     rows = (
         (
             await db.execute(
@@ -775,6 +811,20 @@ async def _apply_metamodel_field_pass(
                 continue
             payload = staged.source_data or {}
             type_key = payload["target_type"]
+            # Skip materialising the metamodel field when the admin has
+            # remapped this native field to an existing TEA field on the
+            # target type (or explicitly dropped it). The card pass
+            # already rewrites the attribute key on the way in.
+            #
+            # ``source_id`` is shaped ``<native_type>:<field_key>`` so we
+            # can look the mapping up without a second query.
+            native_type, _, _ = staged.source_id.partition(":")
+            type_mapping = field_mappings.get(native_type) or {}
+            mapped_target = type_mapping.get(payload.get("field_key", ""))
+            if mapped_target:
+                counts["skipped"] += 1
+                staged.status = "applied"
+                continue
             ct = (
                 await db.execute(select(CardType).where(CardType.key == type_key))
             ).scalar_one_or_none()

@@ -55,9 +55,11 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified as flag_jsonb_modified
 
 from app.api.deps import get_current_user
 from app.database import async_session, get_db
+from app.models.card_type import CardType
 from app.models.migration import Migration, StagedRecord
 from app.models.user import User
 from app.services.migration.apply import apply_migration
@@ -105,6 +107,7 @@ class MigrationOut(BaseModel):
     snapshot_version: str | None
     stats: dict | None
     metamodel_diff: dict | None
+    field_mappings: dict | None
     error_message: str | None
     parsed_at: str | None
     applied_at: str | None
@@ -143,6 +146,7 @@ def _migration_to_out(m: Migration) -> MigrationOut:
         snapshot_version=m.snapshot_version,
         stats=m.stats,
         metamodel_diff=m.metamodel_diff,
+        field_mappings=m.field_mappings or {},
         error_message=m.error_message,
         parsed_at=m.parsed_at.isoformat() if m.parsed_at else None,
         applied_at=m.applied_at.isoformat() if m.applied_at else None,
@@ -313,6 +317,224 @@ async def preview_migration(
         offset=offset,
         limit=limit,
     )
+
+
+class TargetFieldOption(BaseModel):
+    """One Turbo EA field that an admin can map a source field onto."""
+
+    key: str
+    label: str
+    type: str
+    section: str | None = None
+
+
+class SourceFieldRow(BaseModel):
+    """One source-platform custom field discovered in the snapshot."""
+
+    source_field_key: str
+    label: str | None
+    native_data_type: str | None
+    tea_type: str | None  # the parser's inferred type
+    target_tea_type: str  # resolved TEA card-type key (e.g. ``Application``)
+    mapped_to: str | None  # admin's current mapping (``None`` / ``""`` = unmapped)
+
+
+class FieldMappingTypeBlock(BaseModel):
+    native_type: str
+    target_tea_type: str
+    target_type_label: str
+    source_fields: list[SourceFieldRow]
+    available_targets: list[TargetFieldOption]
+
+
+class FieldMappingOptions(BaseModel):
+    """Payload for the field-mapping admin UI.
+
+    One block per ``(native_type, target_tea_type)`` pair surfacing the
+    source fields the parser discovered alongside the list of TEA
+    target fields the admin can map them onto.
+    """
+
+    blocks: list[FieldMappingTypeBlock]
+
+
+class FieldMappingUpdate(BaseModel):
+    field_mappings: dict[str, dict[str, str]]
+
+
+def _collect_fields_schema_targets(card_type: CardType) -> list[TargetFieldOption]:
+    """Flatten ``fields_schema`` into a list of selectable target fields.
+
+    Skips the synthetic ``Imported from {source}`` sections so admins
+    don't map a fresh import onto a previous import's bucket. Also
+    skips the ``__description`` sentinel section which feeds into the
+    Description block on the card detail.
+    """
+    out: list[TargetFieldOption] = []
+    for section in card_type.fields_schema or []:
+        if not isinstance(section, dict):
+            continue
+        section_name = section.get("section")
+        if not isinstance(section_name, str):
+            continue
+        if section_name.startswith("Imported from "):
+            continue
+        if section_name == "__description":
+            continue
+        for f in section.get("fields") or []:
+            if not isinstance(f, dict):
+                continue
+            key = f.get("key")
+            if not isinstance(key, str) or not key:
+                continue
+            out.append(
+                TargetFieldOption(
+                    key=key,
+                    label=f.get("label") or key,
+                    type=f.get("type") or "text",
+                    section=section_name,
+                )
+            )
+    return out
+
+
+@router.get("/{migration_id}/field-mappings", response_model=FieldMappingOptions)
+async def get_field_mappings(
+    migration_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> FieldMappingOptions:
+    """Return source fields per type alongside the candidate TEA targets.
+
+    Drives the **Map fields** section of the migration detail dialog.
+    Available once the migration is in ``parsed`` / ``previewed`` /
+    ``applied`` / ``failed`` state — earlier states have no parsed
+    fields yet.
+    """
+    await PermissionService.require_permission(db, user, "admin.migrate")
+    m = await _load_migration(db, migration_id)
+
+    # Pull every staged metamodel_field row — those are the parser's
+    # discovered custom fields, already partitioned by target TEA type.
+    rows = (
+        (
+            await db.execute(
+                select(StagedRecord).where(
+                    StagedRecord.migration_id == migration_id,
+                    StagedRecord.entity_kind == "metamodel_field",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    # Group source fields by their resolved target TEA card-type key so
+    # the UI can render one mapping table per type.
+    blocks: dict[str, list[SourceFieldRow]] = {}
+    # ``native_type`` is the first segment of ``source_id`` (e.g.
+    # ``Application:criticality`` → ``Application``).
+    native_type_by_target: dict[str, str] = {}
+    for r in rows:
+        payload = r.source_data or {}
+        target_type = payload.get("target_type") or r.card_type_key
+        if not target_type:
+            continue
+        native_type, _, _ = (r.source_id or "").partition(":")
+        if not native_type:
+            continue
+        # Build the row.
+        current_mapping = ((m.field_mappings or {}).get(native_type) or {}).get(
+            payload.get("field_key") or "", None
+        )
+        blocks.setdefault(target_type, []).append(
+            SourceFieldRow(
+                source_field_key=payload.get("field_key") or "",
+                label=payload.get("label"),
+                native_data_type=payload.get("native_data_type"),
+                tea_type=payload.get("tea_type"),
+                target_tea_type=target_type,
+                mapped_to=current_mapping,
+            )
+        )
+        # First-seen wins — every staged field for a given target_type
+        # shares the same native_type in practice.
+        native_type_by_target.setdefault(target_type, native_type)
+
+    # Resolve the available TEA targets per type.
+    out: list[FieldMappingTypeBlock] = []
+    for target_type, field_rows in sorted(blocks.items()):
+        ct = (
+            await db.execute(select(CardType).where(CardType.key == target_type))
+        ).scalar_one_or_none()
+        if ct is None:
+            # Custom (yet-to-be-created) target type — no built-in
+            # targets to offer. Still surface the block so the admin
+            # sees the source fields, but with an empty target list.
+            available: list[TargetFieldOption] = []
+            target_label = target_type
+        else:
+            available = _collect_fields_schema_targets(ct)
+            target_label = ct.label or target_type
+
+        out.append(
+            FieldMappingTypeBlock(
+                native_type=native_type_by_target[target_type],
+                target_tea_type=target_type,
+                target_type_label=target_label,
+                source_fields=sorted(field_rows, key=lambda r: r.source_field_key.lower()),
+                available_targets=sorted(available, key=lambda o: o.label.lower()),
+            )
+        )
+
+    return FieldMappingOptions(blocks=out)
+
+
+@router.put("/{migration_id}/field-mappings", response_model=MigrationOut)
+async def update_field_mappings(
+    migration_id: uuid.UUID,
+    body: FieldMappingUpdate,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> MigrationOut:
+    """Persist the admin's mapping choices.
+
+    The payload is a nested dict
+    ``{<source_native_type>: {<source_field_key>: <tea_field_key>}}``.
+    Empty string values clear a mapping; the literal ``"__skip__"``
+    means "do not import this field at all".
+    """
+    await PermissionService.require_permission(db, user, "admin.migrate")
+    m = await _load_migration(db, migration_id)
+    if m.status not in {"parsed", "previewed"}:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Field mappings can only be edited while the migration is in "
+                f"'parsed' or 'previewed' state (current: {m.status!r})"
+            ),
+        )
+
+    # Clean the payload: drop empty mappings + empty type buckets so the
+    # stored JSON stays minimal.
+    cleaned: dict[str, dict[str, str]] = {}
+    for native_type, mapping in (body.field_mappings or {}).items():
+        if not isinstance(mapping, dict):
+            continue
+        kept = {k: v for k, v in mapping.items() if isinstance(v, str) and v}
+        if kept:
+            cleaned[native_type] = kept
+
+    m.field_mappings = cleaned
+    flag_jsonb_modified(m, "field_mappings")
+    # The mapping affects what the user expects to see on /apply — bump
+    # the migration into ``previewed`` so the UI's "ready to apply"
+    # affordance keeps working.
+    if m.status == "parsed":
+        m.status = "previewed"
+    await db.commit()
+    await db.refresh(m)
+    return _migration_to_out(m)
 
 
 @router.post("/{migration_id}/apply", response_model=MigrationOut, status_code=202)

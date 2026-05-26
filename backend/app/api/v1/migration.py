@@ -836,8 +836,19 @@ async def _apply_job(migration_id_str: str, user_id_str: str) -> None:
             m.stats = {**(m.stats or {}), "apply": counts}
             m.status = "applied" if counts["errors"] == 0 else "failed"
             m.applied_at = datetime.now(timezone.utc)
+            # Errors abort the row but the migration record still lands as
+            # ``failed`` to draw attention. Conflicts are softer — the
+            # rows are skipped on purpose because the importer couldn't
+            # resolve them — but we still surface the count so the admin
+            # knows the snapshot didn't land 1:1.
+            messages: list[str] = []
             if counts["errors"]:
-                m.error_message = f"{counts['errors']} entity error(s) — see staged records"
+                messages.append(f"{counts['errors']} entity error(s)")
+            conflict_count = counts.get("conflicts", 0)
+            if conflict_count:
+                messages.append(f"{conflict_count} unresolved conflict(s) skipped")
+            if messages:
+                m.error_message = " · ".join(messages) + " — see staged records"
             await db.commit()
         except Exception as exc:  # noqa: BLE001
             logger.exception("migration apply job failed")

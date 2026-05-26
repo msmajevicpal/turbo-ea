@@ -299,14 +299,53 @@ export default function MigrationAdmin() {
     }
   };
 
-  const handleApply = async (m: Migration) => {
-    setError(null);
-    try {
-      await api.post<Migration>(`/migration/${m.id}/apply`);
-      loadList();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+  // Pending migration to apply once the conflict-confirmation dialog
+  // resolves. Null means no pending confirmation (i.e. handleApply
+  // fired directly because there was nothing to confirm).
+  const [confirmApply, setConfirmApply] = useState<Migration | null>(null);
+
+  const performApply = useCallback(
+    async (m: Migration) => {
+      setError(null);
+      try {
+        await api.post<Migration>(`/migration/${m.id}/apply`);
+        loadList();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
+    },
+    [loadList],
+  );
+
+  // Conflict tally across every staging tab — drives the "X rows in
+  // conflict" warning and the pre-apply confirmation dialog. Recomputes
+  // when the preview cache changes.
+  const conflictCounts = useMemo(() => {
+    const byKind: Partial<Record<EntityKind, number>> = {};
+    let total = 0;
+    for (const kind of ENTITY_KIND_ORDER) {
+      const c =
+        previews[kind]?.items.filter((r) => r.action === "conflict").length ?? 0;
+      if (c > 0) {
+        byKind[kind] = c;
+        total += c;
+      }
     }
+    return { total, byKind };
+  }, [previews]);
+
+  const handleApply = (m: Migration) => {
+    // If we know about conflicts on this migration, force an explicit
+    // acknowledgement before kicking off the apply. The dialog uses the
+    // currently-cached previews so it's only authoritative for the
+    // migration whose detail view is open; row-action apply (from the
+    // list table) bypasses the confirmation because the previews
+    // aren't loaded yet.
+    if (selected?.id === m.id && conflictCounts.total > 0) {
+      setConfirmApply(m);
+      return;
+    }
+    performApply(m);
   };
 
   const handleDelete = async (m: Migration) => {
@@ -654,6 +693,11 @@ export default function MigrationAdmin() {
                 />
                 <Chip label={`${applyStats.skipped ?? 0} skipped`} variant="outlined" />
                 <Chip
+                  label={`${applyStats.conflicts ?? 0} conflicts`}
+                  color={applyStats.conflicts ? "warning" : "default"}
+                  variant="outlined"
+                />
+                <Chip
                   label={`${applyStats.errors ?? 0} errors`}
                   color={applyStats.errors ? "error" : "default"}
                   variant="outlined"
@@ -661,6 +705,38 @@ export default function MigrationAdmin() {
               </Stack>
             </>
           )}
+
+          {selected &&
+            (selected.status === "parsed" || selected.status === "previewed") &&
+            conflictCounts.total > 0 && (
+              <Alert severity="warning" sx={{ mb: 2 }}>
+                <Typography variant="body2" sx={{ mb: 0.5 }}>
+                  {t(
+                    "migration.conflicts.warning",
+                    "{{count}} row(s) couldn't be resolved and will be skipped on apply.",
+                    { count: conflictCounts.total },
+                  )}
+                </Typography>
+                <Stack direction="row" spacing={0.5} flexWrap="wrap" sx={{ rowGap: 0.5 }}>
+                  {Object.entries(conflictCounts.byKind).map(([kind, c]) => (
+                    <Chip
+                      key={kind}
+                      size="small"
+                      label={`${t(`migration.kind.${kind}`, kind)}: ${c}`}
+                      color="warning"
+                      variant="outlined"
+                      onClick={() => setActiveKind(kind as EntityKind)}
+                    />
+                  ))}
+                </Stack>
+                <Typography variant="caption" color="text.secondary">
+                  {t(
+                    "migration.conflicts.helpText",
+                    "Click a chip to jump to the affected tab. Conflicts stay visible in the staged records after apply so they can be inspected later.",
+                  )}
+                </Typography>
+              </Alert>
+            )}
 
           <Tabs
             value={activeKind}
@@ -746,6 +822,54 @@ export default function MigrationAdmin() {
             </Button>
           )}
           <Button onClick={() => setSelected(null)}>{t("common.close", "Close")}</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={!!confirmApply}
+        onClose={() => setConfirmApply(null)}
+        maxWidth="sm"
+        fullWidth
+        disableRestoreFocus
+      >
+        <DialogTitle>
+          {t("migration.conflicts.confirmTitle", "Apply with unresolved conflicts?")}
+        </DialogTitle>
+        <DialogContent dividers>
+          <Typography variant="body2" sx={{ mb: 1 }}>
+            {t(
+              "migration.conflicts.confirmBody",
+              "{{count}} row(s) couldn't be resolved during staging and will be skipped on apply. The skipped rows stay visible in the staged records so they can be inspected and re-imported after fixing the source data.",
+              { count: conflictCounts.total },
+            )}
+          </Typography>
+          <Stack direction="row" spacing={0.5} flexWrap="wrap" sx={{ rowGap: 0.5 }}>
+            {Object.entries(conflictCounts.byKind).map(([kind, c]) => (
+              <Chip
+                key={kind}
+                size="small"
+                label={`${t(`migration.kind.${kind}`, kind)}: ${c}`}
+                color="warning"
+                variant="outlined"
+              />
+            ))}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmApply(null)}>
+            {t("common.cancel", "Cancel")}
+          </Button>
+          <Button
+            variant="contained"
+            color="warning"
+            onClick={() => {
+              const m = confirmApply!;
+              setConfirmApply(null);
+              performApply(m);
+            }}
+          >
+            {t("migration.conflicts.confirmApply", "Apply and skip conflicts")}
+          </Button>
         </DialogActions>
       </Dialog>
     </Box>

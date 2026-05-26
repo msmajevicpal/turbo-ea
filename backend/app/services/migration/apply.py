@@ -66,7 +66,7 @@ async def apply_migration(
     ``migration.stats``. Errors are kept per-pass so the admin can see
     which entity kind failed even when later passes succeed.
     """
-    counts = {"created": 0, "updated": 0, "skipped": 0, "errors": 0}
+    counts = {"created": 0, "updated": 0, "skipped": 0, "errors": 0, "conflicts": 0}
     per_pass: dict[str, dict[str, int]] = {}
 
     for pass_name, runner in (
@@ -86,7 +86,10 @@ async def apply_migration(
         pass_counts = await runner(db, migration, user)
         per_pass[pass_name] = pass_counts
         for k, v in pass_counts.items():
-            counts[k] += v
+            # ``conflicts`` is opt-in per pass — passes that haven't been
+            # updated yet still report under ``skipped`` only. Aggregate
+            # whichever shape they return.
+            counts[k] = counts.get(k, 0) + v
 
     counts["per_pass"] = per_pass  # type: ignore[assignment]
     return counts
@@ -178,7 +181,7 @@ async def _apply_card_pass(
     migration: Migration,
     user: User,
 ) -> dict[str, int]:
-    counts = {"created": 0, "updated": 0, "skipped": 0, "errors": 0}
+    counts = {"created": 0, "updated": 0, "skipped": 0, "errors": 0, "conflicts": 0}
     field_mappings = migration.field_mappings or {}
 
     rows = list(
@@ -221,7 +224,7 @@ async def _apply_card_pass(
             staged.status = "applied"
             continue
         if staged.action == "conflict":
-            counts["skipped"] += 1
+            counts["conflicts"] += 1
             staged.status = "applied"  # conflict was already surfaced; treat as terminal
             continue
 
@@ -450,7 +453,7 @@ async def _apply_tag_group_pass(
     migration: Migration,
     user: User,
 ) -> dict[str, int]:
-    counts = {"created": 0, "updated": 0, "skipped": 0, "errors": 0}
+    counts = {"created": 0, "updated": 0, "skipped": 0, "errors": 0, "conflicts": 0}
     rows = (
         (
             await db.execute(
@@ -496,7 +499,7 @@ async def _apply_tag_pass(
     migration: Migration,
     user: User,
 ) -> dict[str, int]:
-    counts = {"created": 0, "updated": 0, "skipped": 0, "errors": 0}
+    counts = {"created": 0, "updated": 0, "skipped": 0, "errors": 0, "conflicts": 0}
     # Build group-name → group_id index from the freshly-applied tag_group rows.
     group_rows = (
         (
@@ -574,7 +577,7 @@ async def _apply_card_tag_pass(
     migration: Migration,
     user: User,
 ) -> dict[str, int]:
-    counts = {"created": 0, "updated": 0, "skipped": 0, "errors": 0}
+    counts = {"created": 0, "updated": 0, "skipped": 0, "errors": 0, "conflicts": 0}
     rows = (
         (
             await db.execute(
@@ -634,7 +637,7 @@ async def _apply_relation_pass(
     migration: Migration,
     user: User,
 ) -> dict[str, int]:
-    counts = {"created": 0, "updated": 0, "skipped": 0, "errors": 0}
+    counts = {"created": 0, "updated": 0, "skipped": 0, "errors": 0, "conflicts": 0}
     rows = (
         (
             await db.execute(
@@ -649,7 +652,7 @@ async def _apply_relation_pass(
     )
     for staged in rows:
         if staged.action == "conflict":
-            counts["skipped"] += 1
+            counts["conflicts"] += 1
             staged.status = "applied"
             continue
         try:
@@ -776,7 +779,7 @@ async def _apply_metamodel_type_pass(
     user: User,
 ) -> dict[str, int]:
     """Create new (non-builtin) card types for custom native entity types."""
-    counts = {"created": 0, "updated": 0, "skipped": 0, "errors": 0}
+    counts = {"created": 0, "updated": 0, "skipped": 0, "errors": 0, "conflicts": 0}
     rows = (
         (
             await db.execute(
@@ -854,7 +857,7 @@ async def _apply_metamodel_field_pass(
     ``Imported from {source}`` section so customers can recognise what
     came from the migration.
     """
-    counts = {"created": 0, "updated": 0, "skipped": 0, "errors": 0}
+    counts = {"created": 0, "updated": 0, "skipped": 0, "errors": 0, "conflicts": 0}
     section_name = f"Imported from {migration.source_type}"
     field_mappings = migration.field_mappings or {}
     rows = (
@@ -952,7 +955,7 @@ async def _apply_metamodel_relation_type_pass(
     user: User,
 ) -> dict[str, int]:
     """Create new (non-builtin) relation types for custom native relations."""
-    counts = {"created": 0, "updated": 0, "skipped": 0, "errors": 0}
+    counts = {"created": 0, "updated": 0, "skipped": 0, "errors": 0, "conflicts": 0}
     rows = (
         (
             await db.execute(
@@ -1026,7 +1029,7 @@ async def _apply_user_pass(
     migration: Migration,
     user: User,
 ) -> dict[str, int]:
-    counts = {"created": 0, "updated": 0, "skipped": 0, "errors": 0}
+    counts = {"created": 0, "updated": 0, "skipped": 0, "errors": 0, "conflicts": 0}
     rows = (
         (
             await db.execute(
@@ -1082,7 +1085,7 @@ async def _apply_subscription_pass(
     migration: Migration,
     user: User,
 ) -> dict[str, int]:
-    counts = {"created": 0, "updated": 0, "skipped": 0, "errors": 0}
+    counts = {"created": 0, "updated": 0, "skipped": 0, "errors": 0, "conflicts": 0}
     rows = (
         (
             await db.execute(
@@ -1097,7 +1100,7 @@ async def _apply_subscription_pass(
     )
     for staged in rows:
         if staged.action == "conflict":
-            counts["skipped"] += 1
+            counts["conflicts"] += 1
             staged.status = "applied"
             continue
         try:
@@ -1158,7 +1161,7 @@ async def _apply_document_pass(
     migration: Migration,
     user: User,
 ) -> dict[str, int]:
-    counts = {"created": 0, "updated": 0, "skipped": 0, "errors": 0}
+    counts = {"created": 0, "updated": 0, "skipped": 0, "errors": 0, "conflicts": 0}
     rows = (
         (
             await db.execute(
@@ -1173,7 +1176,7 @@ async def _apply_document_pass(
     )
     for staged in rows:
         if staged.action == "conflict":
-            counts["skipped"] += 1
+            counts["conflicts"] += 1
             staged.status = "applied"
             continue
         try:
@@ -1218,7 +1221,7 @@ async def _apply_comment_pass(
     migration: Migration,
     user: User,
 ) -> dict[str, int]:
-    counts = {"created": 0, "updated": 0, "skipped": 0, "errors": 0}
+    counts = {"created": 0, "updated": 0, "skipped": 0, "errors": 0, "conflicts": 0}
     rows = (
         (
             await db.execute(

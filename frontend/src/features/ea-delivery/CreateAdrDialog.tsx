@@ -48,7 +48,10 @@ export default function CreateAdrDialog({
   const [cardSearch, setCardSearch] = useState("");
   const [searchResults, setSearchResults] = useState<Card[]>([]);
 
-  // Reset state when dialog opens
+  // Reset state when dialog opens. preLinkedCards is intentionally omitted
+  // from the deps — callers that don't pass it get a fresh `[]` default on
+  // every render, which would re-fire this effect and clobber the user's
+  // input on every keystroke (#618).
   useEffect(() => {
     if (open) {
       setTitle("");
@@ -59,7 +62,8 @@ export default function CreateAdrDialog({
       setCardSearch("");
       setSearchResults([]);
     }
-  }, [open, preLinkedCards]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   const searchCardsHandler = async (q: string) => {
     setCardSearch(q);

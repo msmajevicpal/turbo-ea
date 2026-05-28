@@ -5,6 +5,11 @@ All notable changes to Turbo EA are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.30.5] - 2026-05-28
+
+### Fixed
+- **GRC → Decisions: Title field in the *Add new Decision* dialog no longer clears on every keystroke.** Opening the create-ADR dialog from the GRC Governance panel made it impossible to enter a title — each keystroke was immediately wiped. The dialog's reset-on-open `useEffect` had `preLinkedCards` in its dependency array, and `DecisionsPanel` (the only caller that doesn't pass that prop) hit the default `= []`, which produced a fresh array on every parent render. Each keystroke re-rendered the parent, the new `[]` looked like a changed dep, and the effect re-fired `setTitle("")`. The dep array now reads `[open]` only, so the reset fires once per open-transition as intended. Fixes [#618](https://github.com/vincentmakes/turbo-ea/issues/618).
+
 ## [1.30.4] - 2026-05-26
 
 ### Changed

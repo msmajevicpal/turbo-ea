@@ -45,7 +45,7 @@ I campi definiscono gli attributi personalizzati disponibili sulle card di quest
 | **Tipo** | text, multiline_text, number, cost, boolean, date, url, single_select o multiple_select |
 | **Opzioni** | Per i campi di selezione: le scelte disponibili con etichette e colori opzionali |
 | **Obbligatorio** | Se il campo deve essere compilato per il punteggio di qualità dei dati |
-| **Peso** | Quanto questo campo contribuisce al punteggio di qualità dei dati (0-10) |
+| **Qualità dei dati** | Quanto questo campo incide sul punteggio di qualità dei dati: **Ignora** (escluso), **Normale**, **Importante** o **Critico** |
 | **Sola lettura** | Impedisce la modifica manuale (utile per i campi calcolati) |
 
 Cliccate su **+ Aggiungi campo** per creare un nuovo campo, o cliccate su un campo esistente per modificarlo nella **Finestra editor campo**.
@@ -60,6 +60,14 @@ I campi sono organizzati in **sezioni** nella pagina di dettaglio della card. Po
 - Trascinare i campi tra le sezioni e riordinarli
 
 Il nome speciale di sezione `__description` aggiunge campi alla sezione Descrizione della pagina di dettaglio della card.
+
+#### Punteggio di qualità dei dati
+
+Il punteggio di **qualità dei dati** di una card misura in modo ponderato quanto è completa. Ogni campo incide sul punteggio in base alla sua importanza di **Qualità dei dati** (impostata nell'editor dei campi): **Ignora** esclude il campo dal punteggio, mentre **Normale**, **Importante** e **Critico** lo fanno contare progressivamente di più.
+
+Oltre ai campi, contribuiscono quattro fattori integrati: la **Descrizione**, il **Ciclo di vita** (se è impostata almeno una data del ciclo di vita) e tutte le **Relazioni obbligatorie** o i **Tag obbligatori** applicabili al tipo. Puoi regolare o escludere ciascuno di essi dal pannello **Qualità dei dati** in fondo all'editor di layout del tipo di card, con lo stesso selettore Ignora / Normale / Importante / Critico. Ad esempio, imposta il **Ciclo di vita** su *Ignora* per un tipo le cui card legittimamente non riportano mai date, così da non penalizzarle.
+
+La modifica di qualsiasi impostazione di importanza ricalcola immediatamente il punteggio di ogni card esistente di quel tipo. I nuovi campi sono *Normale* per impostazione predefinita e quindi contano per il punteggio non appena li aggiungi.
 
 #### Sottotipi (Sotto-modelli)
 

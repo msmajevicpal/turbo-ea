@@ -45,7 +45,7 @@ Felter definerer de brugerdefinerede egenskaber, der er tilgængelige på kort a
 | **Type** | text, multiline_text, number, cost, boolean, date, url, single_select eller multiple_select |
 | **Indstillinger** | For udvælgelsesfelter: de tilgængelige valg med etiketter og valgfri farver |
 | **Påkrævet** | Hvorvidt feltet skal udfyldes for datakvalitetsscoring |
-| **Vægt** | Hvor meget dette felt bidrager til datakvalitetsscoren (0-10) |
+| **Datakvalitet** | Hvor meget dette felt tæller med i datakvalitetsscoren: **Ignorér** (ekskluderet), **Normal**, **Vigtig** eller **Kritisk** |
 | **Skrivebeskyttet** | Forhindrer manuel redigering (nyttigt for beregnede felter) |
 
 Klik på **+ Tilføj felt** for at oprette et nyt felt, eller klik på et eksisterende felt for at redigere det i **Feltredigeringsdialogen**.
@@ -60,6 +60,14 @@ Felter er organiseret i **sektioner** på kortdetaljesiden. Du kan:
 - Trække felter mellem sektioner og omarrangere dem
 
 Det særlige sektionsnavn `__description` tilføjer felter til Beskrivelsessektionen af kortdetaljesiden.
+
+#### Datakvalitetsscore
+
+Et korts **datakvalitetsscore** er et vægtet mål for, hvor komplet det er. Hvert felt tæller med i scoren efter sin **Datakvalitet**-vigtighed (angivet i felteditoren): **Ignorér** fjerner feltet fra scoren, mens **Normal**, **Vigtig** og **Kritisk** får det til at tælle gradvist mere.
+
+Ud over felterne bidrager fire indbyggede faktorer også: **Beskrivelsen**, **Livscyklus** (om der er angivet en livscyklusdato) samt eventuelle **obligatoriske relationer** eller **obligatoriske tags**, der gælder for typen. Du kan justere eller udelukke hver af disse fra panelet **Datakvalitet** nederst i korttypens layouteditor med den samme vælger Ignorér / Normal / Vigtig / Kritisk. Sæt for eksempel **Livscyklus** til *Ignorér* for en type, hvis kort legitimt aldrig har datoer, så de ikke straffes.
+
+Ændring af en vigtighedsindstilling genberegner straks scoren for alle eksisterende kort af den type. Nye felter er som standard *Normal* og tæller derfor med i scoren, så snart du tilføjer dem.
 
 #### Undertyper (sub-skabeloner)
 

@@ -11,6 +11,8 @@ import TextField from "@mui/material/TextField";
 import Tooltip from "@mui/material/Tooltip";
 import ToggleButton from "@mui/material/ToggleButton";
 import ToggleButtonGroup from "@mui/material/ToggleButtonGroup";
+import Divider from "@mui/material/Divider";
+import ImportanceSelect from "./metamodel/ImportanceSelect";
 import {
   DndContext,
   closestCenter,
@@ -37,7 +39,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 
-import type { CardType, SectionDef, FieldDef, SectionConfig } from "@/types";
+import type { CardType, SectionDef, FieldDef, SectionConfig, DataQualityConfig } from "@/types";
 import { useResolveLabel } from "@/hooks/useResolveLabel";
 import { api } from "@/api/client";
 import MaterialSymbol from "@/components/MaterialSymbol";
@@ -962,6 +964,11 @@ export default function CardLayoutEditor({
     await persistSectionConfig({ [sectionKey]: { ...(secCfg[sectionKey] || {}), ...prop } });
   };
 
+  const dqConfig = ((secCfg as { __dataQuality?: DataQualityConfig }).__dataQuality || {});
+  const updateDataQuality = async (bucket: keyof DataQualityConfig, weight: number) => {
+    await persistSectionConfig({ __dataQuality: { ...dqConfig, [bucket]: weight } });
+  };
+
   const customToSchemaIdx = (customIdx: number) => {
     let count = 0;
     for (let i = 0; i < cardType.fields_schema.length; i++) {
@@ -1072,6 +1079,37 @@ export default function CardLayoutEditor({
           {t("cardLayout.addSection")}
         </Button>
       )}
+
+      <Divider sx={{ my: 3 }} />
+
+      <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 0.5 }}>
+        {t("metamodel.dataQuality.title")}
+      </Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+        {t("metamodel.dataQuality.subtitle")}
+      </Typography>
+      <Box sx={{ display: "flex", flexWrap: "wrap", gap: 2 }}>
+        <ImportanceSelect
+          label={t("metamodel.dataQuality.description")}
+          value={dqConfig.description}
+          onChange={(w) => updateDataQuality("description", w)}
+        />
+        <ImportanceSelect
+          label={t("metamodel.dataQuality.lifecycle")}
+          value={dqConfig.lifecycle}
+          onChange={(w) => updateDataQuality("lifecycle", w)}
+        />
+        <ImportanceSelect
+          label={t("metamodel.dataQuality.relations")}
+          value={dqConfig.relations}
+          onChange={(w) => updateDataQuality("relations", w)}
+        />
+        <ImportanceSelect
+          label={t("metamodel.dataQuality.tags")}
+          value={dqConfig.tags}
+          onChange={(w) => updateDataQuality("tags", w)}
+        />
+      </Box>
     </Box>
   );
 }

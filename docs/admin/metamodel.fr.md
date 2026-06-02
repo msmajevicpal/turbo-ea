@@ -45,7 +45,7 @@ Les champs définissent les attributs personnalisés disponibles sur les fiches 
 | **Type** | text, multiline_text, number, cost, boolean, date, url, single_select ou multiple_select |
 | **Options** | Pour les champs de sélection : les choix disponibles avec libellés et couleurs optionnelles |
 | **Obligatoire** | Si le champ doit être rempli pour le calcul du score de qualité des données |
-| **Poids** | Contribution de ce champ au score de qualité des données (0-10) |
+| **Qualité des données** | Dans quelle mesure ce champ compte dans le score de qualité des données : **Ignorer** (exclu), **Normale**, **Important** ou **Critique** |
 | **Lecture seule** | Empêche la modification manuelle (utile pour les champs calculés) |
 
 Cliquez sur **+ Ajouter un champ** pour créer un nouveau champ, ou cliquez sur un champ existant pour le modifier dans le **Dialogue de l'éditeur de champs**.
@@ -60,6 +60,14 @@ Les champs sont organisés en **sections** sur la page de détail des fiches. Vo
 - Glisser les champs entre les sections et les réorganiser
 
 Le nom de section special `__description` ajoute les champs à la section Description de la page de détail des fiches.
+
+#### Évaluation de la qualité des données
+
+Le score de **qualité des données** d'une fiche mesure de manière pondérée son niveau de complétude. Chaque champ compte dans le score selon son importance **Qualité des données** (définie dans l'éditeur de champ) : **Ignorer** retire le champ du score, tandis que **Normale**, **Important** et **Critique** le font compter de plus en plus.
+
+Au-delà des champs, quatre facteurs intégrés contribuent également : la **Description**, le **Cycle de vie** (selon qu'une date de cycle de vie est renseignée) ainsi que toutes les **Relations obligatoires** ou **Étiquettes obligatoires** applicables au type. Vous pouvez ajuster ou exclure chacun d'eux depuis le panneau **Qualité des données** en bas de l'éditeur de mise en page du type de fiche, avec le même sélecteur Ignorer / Normale / Important / Critique. Par exemple, réglez le **Cycle de vie** sur *Ignorer* pour un type dont les fiches ne portent légitimement jamais de dates, afin qu'elles ne soient pas pénalisées.
+
+Modifier un réglage d'importance recalcule immédiatement le score de chaque fiche existante de ce type. Les nouveaux champs sont *Normale* par défaut et comptent donc dans le score dès que vous les ajoutez.
 
 #### Sous-types (Sous-modèles)
 

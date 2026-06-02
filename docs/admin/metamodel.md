@@ -45,7 +45,7 @@ Fields define the custom attributes available on cards of this type. Each field 
 | **Type** | text, multiline_text, number, cost, boolean, date, url, single_select, or multiple_select |
 | **Options** | For select fields: the available choices with labels and optional colors |
 | **Required** | Whether the field must be filled for data quality scoring |
-| **Weight** | How much this field contributes to the data quality score (0–10) |
+| **Data quality** | How much this field counts toward the data quality score: **Ignore** (excluded), **Normal**, **Important**, or **Critical** |
 | **Read-only** | Prevents manual editing (useful for calculated fields) |
 
 Click **+ Add Field** to create a new field, or click an existing field to edit it in the **Field Editor Dialog**.
@@ -60,6 +60,14 @@ Fields are organized into **sections** on the card detail page. You can:
 - Drag fields between sections and reorder them
 
 The special section name `__description` adds fields to the Description section of the card detail page.
+
+#### Data quality scoring
+
+A card's **data quality** score is a weighted measure of how complete it is. Each field counts toward the score according to its **Data quality** importance (set in the Field Editor): **Ignore** removes the field from the score, while **Normal**, **Important**, and **Critical** make it count progressively more.
+
+Beyond fields, four built-in factors also contribute: the **Description**, the **Lifecycle** (whether any lifecycle date is set), and any **mandatory Relations** or **mandatory Tags** that apply to the type. You can tune or exclude each of these from the **Data quality** panel at the bottom of the card-type layout editor, using the same Ignore / Normal / Important / Critical picker. For example, set **Lifecycle** to *Ignore* for a type whose cards legitimately never carry dates, so they are not penalized.
+
+Changing any importance setting immediately re-scores every existing card of that type. New fields default to *Normal*, so they count toward the score as soon as you add them.
 
 #### Subtypes (Sub-Templates)
 

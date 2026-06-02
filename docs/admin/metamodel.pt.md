@@ -45,7 +45,7 @@ Campos definem os atributos personalizados disponíveis nos cards deste tipo. Ca
 | **Tipo** | text, multiline_text, number, cost, boolean, date, url, single_select ou multiple_select |
 | **Opções** | Para campos de seleção: as escolhas disponíveis com rótulos e cores opcionais |
 | **Obrigatório** | Se o campo deve ser preenchido para pontuação de qualidade dos dados |
-| **Peso** | Quanto este campo contribui para a pontuação de qualidade dos dados (0-10) |
+| **Qualidade dos dados** | O quanto este campo conta para a pontuação de qualidade dos dados: **Ignorar** (excluído), **Normal**, **Importante** ou **Crítico** |
 | **Somente leitura** | Impede edição manual (útil para campos calculados) |
 
 Clique em **+ Adicionar Campo** para criar um novo campo, ou clique em um campo existente para editá-lo no **Diálogo de Editor de Campo**.
@@ -60,6 +60,14 @@ Campos são organizados em **seções** na página de detalhe do card. Você pod
 - Arrastar campos entre seções e reordená-los
 
 O nome de seção especial `__description` adiciona campos à seção de Descrição da página de detalhe do card.
+
+#### Pontuação de qualidade dos dados
+
+A pontuação de **qualidade dos dados** de um card mede de forma ponderada o quão completo ele está. Cada campo conta para a pontuação de acordo com a sua importância de **Qualidade dos dados** (definida no Editor de campos): **Ignorar** remove o campo da pontuação, enquanto **Normal**, **Importante** e **Crítico** fazem com que ele conte cada vez mais.
+
+Além dos campos, quatro fatores integrados também contribuem: a **Descrição**, o **Ciclo de vida** (se alguma data de ciclo de vida estiver definida) e quaisquer **Relações obrigatórias** ou **Etiquetas obrigatórias** aplicáveis ao tipo. Você pode ajustar ou excluir cada um deles no painel **Qualidade dos dados** na parte inferior do editor de layout do tipo de card, com o mesmo seletor Ignorar / Normal / Importante / Crítico. Por exemplo, defina o **Ciclo de vida** como *Ignorar* para um tipo cujos cards legitimamente nunca têm datas, para que não sejam penalizados.
+
+Alterar qualquer configuração de importância recalcula imediatamente a pontuação de todos os cards existentes desse tipo. Os campos novos são *Normal* por padrão, portanto contam para a pontuação assim que você os adiciona.
 
 #### Subtipos (Sub-modelos)
 

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import Box from "@mui/material/Box";
 import Chip from "@mui/material/Chip";
 import Slider from "@mui/material/Slider";
+import Tooltip from "@mui/material/Tooltip";
 import { useTheme } from "@mui/material/styles";
 import { useTranslation } from "react-i18next";
 
@@ -45,6 +46,44 @@ interface ImportanceSliderProps {
   onChange: (weight: number) => void;
 }
 
+/**
+ * Compact read-only tier badge (the number) used to surface a field's or
+ * built-in factor's data-quality weight at a glance in the layout editor.
+ */
+export function WeightBadge({ weight }: { weight: number | undefined }) {
+  const { t } = useTranslation("admin");
+  const tierColor = useTierColor();
+  const tier = weightToTier(weight);
+  return (
+    <Tooltip
+      title={t("metamodel.dataQuality.badgeTooltip", {
+        tier: t(`metamodel.importance.${TIER_KEYS[tier]}`),
+        value: tier,
+      })}
+    >
+      <Box
+        sx={{
+          width: 16,
+          height: 16,
+          borderRadius: "50%",
+          flexShrink: 0,
+          bgcolor: tier === 0 ? "transparent" : tierColor(tier),
+          border: tier === 0 ? "1px dashed" : "none",
+          borderColor: "text.disabled",
+          color: "#fff",
+          fontSize: "0.6rem",
+          fontWeight: 700,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        {tier}
+      </Box>
+    </Tooltip>
+  );
+}
+
 export default function ImportanceSlider({ value, onChange }: ImportanceSliderProps) {
   const { t } = useTranslation("admin");
   const theme = useTheme();
@@ -58,9 +97,11 @@ export default function ImportanceSlider({ value, onChange }: ImportanceSliderPr
 
   const color = tierColor(tier);
   const tierLabel = t(`metamodel.importance.${TIER_KEYS[tier]}`);
-  // The Ignore ramp colour is intentionally faint for the track; use a
-  // readable secondary tone for the chip so the weight is always legible.
+  // The Ignore ramp colour is intentionally faint (semi-transparent) for the
+  // track; use solid tones for the chip text and the thumb so the weight is
+  // always legible and the thumb doesn't show the rail through it at zero.
   const chipColor = tier === 0 ? theme.palette.text.secondary : color;
+  const thumbColor = tier === 0 ? theme.palette.grey[500] : color;
 
   return (
     <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, width: "100%" }}>
@@ -82,7 +123,7 @@ export default function ImportanceSlider({ value, onChange }: ImportanceSliderPr
           py: 1,
           "& .MuiSlider-rail": { height: 6, opacity: 0.3 },
           "& .MuiSlider-track": { height: 6, border: "none" },
-          "& .MuiSlider-thumb": { width: 16, height: 16 },
+          "& .MuiSlider-thumb": { width: 16, height: 16, bgcolor: thumbColor, opacity: 1 },
           "& .MuiSlider-mark": { height: 6, width: 2, bgcolor: "currentColor", opacity: 0.4 },
           "& .MuiSlider-markActive": { bgcolor: "currentColor", opacity: 1 },
         }}

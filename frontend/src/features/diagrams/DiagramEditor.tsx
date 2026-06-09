@@ -4,6 +4,10 @@ import { useTranslation } from "react-i18next";
 import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
 import IconButton from "@mui/material/IconButton";
+import Menu from "@mui/material/Menu";
+import MenuItem from "@mui/material/MenuItem";
+import ListItemIcon from "@mui/material/ListItemIcon";
+import ListItemText from "@mui/material/ListItemText";
 import Snackbar from "@mui/material/Snackbar";
 import Button from "@mui/material/Button";
 import Tooltip from "@mui/material/Tooltip";
@@ -2453,9 +2457,14 @@ export default function DiagramEditor() {
     }
   }, [view, collectCanvasCards, t]);
 
+  // Overflow ("More") menu for occasional / migration actions that don't
+  // warrant a permanent toolbar button.
+  const [moreMenuAnchor, setMoreMenuAnchor] = useState<null | HTMLElement>(null);
+
   /** Upgrade cards already on the canvas with their card-type icon. Lets users
    *  add icons to diagrams created before the icon feature existed. */
   const handleApplyIcons = useCallback(() => {
+    setMoreMenuAnchor(null);
     const frame = iframeRef.current;
     if (!frame) return;
     const iconByType = new Map<string, string>(
@@ -2614,13 +2623,25 @@ export default function DiagramEditor() {
         </Typography>
         {saving && <CircularProgress size={16} sx={{ ml: 1 }} />}
 
-        {/* Apply card-type icons to cards already on the canvas — lets older
-            diagrams pick up the type icons added by newer inserts. */}
-        <Tooltip title={t("editor.toolbar.applyIconsTooltip")}>
-          <IconButton size="small" onClick={handleApplyIcons}>
-            <MaterialSymbol icon="emoji_symbols" size={20} />
+        {/* Overflow menu for occasional actions (e.g. one-off migration of an
+            older diagram to show the card-type icons). */}
+        <Tooltip title={t("editor.toolbar.moreActions")}>
+          <IconButton size="small" onClick={(e) => setMoreMenuAnchor(e.currentTarget)}>
+            <MaterialSymbol icon="more_vert" size={20} />
           </IconButton>
         </Tooltip>
+        <Menu
+          anchorEl={moreMenuAnchor}
+          open={Boolean(moreMenuAnchor)}
+          onClose={() => setMoreMenuAnchor(null)}
+        >
+          <MenuItem onClick={handleApplyIcons}>
+            <ListItemIcon>
+              <MaterialSymbol icon="emoji_symbols" size={20} />
+            </ListItemIcon>
+            <ListItemText>{t("editor.toolbar.applyIcons")}</ListItemText>
+          </MenuItem>
+        </Menu>
 
         {/* View perspective dropdown (Phase 5) */}
         <ViewSelector

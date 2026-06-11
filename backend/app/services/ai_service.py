@@ -660,7 +660,7 @@ async def check_provider_connection(
             raise httpx.HTTPError("Deployment name (model) is required for Azure OpenAI")
         url = f"{provider_url.rstrip('/')}/openai/deployments/{model}/chat/completions"
         headers = {"api-key": api_key, "Content-Type": "application/json"}
-        payload = {
+        payload: dict[str, Any] = {
             "messages": [{"role": "user", "content": "Hi"}],
         }
         try:
@@ -703,6 +703,9 @@ async def check_provider_connection(
             "anthropic-version": "2023-06-01",
             "content-type": "application/json",
         }
+        # Reuses the ``dict[str, Any]`` `payload` annotation from the Azure
+        # block above — mypy treats the two assignments as the same name in
+        # the enclosing function scope, so heterogeneous values type-check.
         payload = {
             "model": model or "claude-haiku-4-5-20251001",
             "max_tokens": 1,

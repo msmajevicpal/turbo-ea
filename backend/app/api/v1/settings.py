@@ -1,4 +1,4 @@
-﻿"""Admin-only application settings — email / SMTP configuration + logo management."""
+"""Admin-only application settings — email / SMTP configuration + logo management."""
 
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ from app.models.card_type import CardType
 from app.models.compliance_regulation import ComplianceRegulation
 from app.models.relation_type import RelationType
 from app.models.user import User
+from app.services.ai_service import DEFAULT_AZURE_API_VERSION
 from app.services.permission_service import PermissionService
 
 router = APIRouter(prefix="/settings", tags=["settings"])
@@ -1004,7 +1005,7 @@ class AiSettingsPayload(BaseModel):
     provider_url: str = ""
     api_key: str = ""
     model: str = ""
-    api_version: str = "2025-01-01"
+    api_version: str = DEFAULT_AZURE_API_VERSION
     search_provider: str = "duckduckgo"
     search_url: str = ""
     enabled_types: list[str] = []
@@ -1039,7 +1040,7 @@ async def get_ai_settings(
         "provider_url": ai.get("providerUrl", ""),
         "api_key": _AI_KEY_MASK if api_key_stored else "",
         "model": ai.get("model", ""),
-        "api_version": ai.get("apiVersion", "2025-01-01"),
+        "api_version": ai.get("apiVersion", DEFAULT_AZURE_API_VERSION),
         "search_provider": ai.get("searchProvider", "duckduckgo"),
         "search_url": ai.get("searchUrl", ""),
         "enabled_types": ai.get("enabledTypes", []),
@@ -1148,7 +1149,7 @@ async def test_ai_connection(
     if provider_type in ("openai", "azure_openai", "anthropic") and not api_key:
         raise HTTPException(400, "API key is required for commercial LLM providers.")
 
-    api_version = ai.get("apiVersion", "2025-01-01")
+    api_version = ai.get("apiVersion", DEFAULT_AZURE_API_VERSION)
 
     try:
         result = await check_provider_connection(

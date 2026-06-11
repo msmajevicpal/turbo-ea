@@ -1,4 +1,4 @@
-﻿"""Unit tests for the AI service — web search + LLM description generation.
+"""Unit tests for the AI service — web search + LLM description generation.
 
 These tests do NOT require a database — they test pure logic and mock HTTP calls.
 """

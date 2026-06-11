@@ -1,4 +1,4 @@
-﻿"""AI service — web search + LLM description generation for cards.
+"""AI service — web search + LLM description generation for cards.
 
 Two-step pipeline:
   1. Web search (DuckDuckGo HTML scrape) for the card name
@@ -22,6 +22,11 @@ from typing import Any
 import httpx
 
 logger = logging.getLogger("turboea.ai")
+
+# Default Azure OpenAI api-version when none is configured. Single source of
+# truth — referenced by ai_service.py, settings.py, ai_suggest.py, and AiAdmin.tsx.
+# Update here when bumping the platform-wide default.
+DEFAULT_AZURE_API_VERSION = "2025-01-01"
 
 # ---------------------------------------------------------------------------
 # Module-level HTTP clients (reused across requests)
@@ -474,7 +479,7 @@ async def _call_azure_openai(
     api_key: str,
     model: str,
     messages: list[dict[str, str]],
-    api_version: str = "2025-01-01",
+    api_version: str = DEFAULT_AZURE_API_VERSION,
 ) -> dict[str, Any]:
     """Call an Azure Hosted OpenAI deployment endpoint.
 
@@ -482,6 +487,12 @@ async def _call_azure_openai(
     of Authorization: Bearer), requires an api-version query parameter, and the
     model/deployment name is embedded in the URL rather than the request body.
     URL format: {endpoint}/openai/deployments/{deployment}/chat/completions
+
+    Payload mirrors `_call_openai_compatible` so the suggestion quality stays
+    identical across providers: low temperature for deterministic output, and
+    `response_format: json_object` so we get structured JSON back. The system
+    prompt built by `build_llm_prompt` always contains the literal word "json",
+    which is Azure's hard requirement for the `json_object` response format.
     """
     client = await _get_llm_client()
     url = f"{provider_url.rstrip('/')}/openai/deployments/{model}/chat/completions"
@@ -492,13 +503,9 @@ async def _call_azure_openai(
     }
     payload: dict[str, Any] = {
         "messages": messages,
+        "temperature": 0.1,
+        "response_format": {"type": "json_object"},
     }
-
-    # json_object response_format requires the word 'json' to appear in the
-    # prompt — send it only when the system message already contains 'json'
-    # (which our build_llm_prompt always does).
-    if any("json" in m.get("content", "").lower() for m in messages):
-        payload["response_format"] = {"type": "json_object"}
 
     try:
         resp = await client.post(
@@ -616,7 +623,7 @@ async def call_llm(
     *,
     provider_type: str = "ollama",
     api_key: str = "",
-    api_version: str = "2025-01-01",
+    api_version: str = DEFAULT_AZURE_API_VERSION,
 ) -> dict[str, Any]:
     """Dispatch an LLM call to the configured provider.
 
@@ -641,7 +648,7 @@ async def check_provider_connection(
     provider_type: str = "ollama",
     api_key: str = "",
     model: str = "",
-    api_version: str = "2025-01-01",
+    api_version: str = DEFAULT_AZURE_API_VERSION,
 ) -> dict[str, Any]:
     """Test connectivity to an LLM provider. Returns available models and status."""
     client = await _get_llm_client()
@@ -670,12 +677,8 @@ async def check_provider_connection(
             if exc.response.status_code == 401:
                 raise httpx.HTTPError("Invalid Azure OpenAI API key") from exc
             if exc.response.status_code == 404:
-                raise httpx.HTTPError(
-                    f"Azure OpenAI deployment '{model}' not found"
-                ) from exc
-            raise httpx.HTTPError(
-                f"Cannot reach Azure OpenAI: {type(exc).__name__}"
-            ) from exc
+                raise httpx.HTTPError(f"Azure OpenAI deployment '{model}' not found") from exc
+            raise httpx.HTTPError(f"Cannot reach Azure OpenAI: {type(exc).__name__}") from exc
         except httpx.HTTPError as exc:
             raise httpx.HTTPError(f"Cannot reach Azure OpenAI: {type(exc).__name__}") from exc
 
@@ -822,7 +825,7 @@ async def generate_portfolio_insights(
     *,
     provider_type: str = "ollama",
     api_key: str = "",
-    api_version: str = "2025-01-01",
+    api_version: str = DEFAULT_AZURE_API_VERSION,
     principles: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     """Analyse application portfolio summary data and return strategic insights."""
@@ -992,7 +995,9 @@ async def generate_portfolio_insights(
     ]
 
     raw = await call_llm(
-        provider_url, model, messages,
+        provider_url,
+        model,
+        messages,
         provider_type=provider_type,
         api_key=api_key,
         api_version=api_version,
@@ -1035,7 +1040,7 @@ async def suggest_metadata(
     *,
     provider_type: str = "ollama",
     api_key: str = "",
-    api_version: str = "2025-01-01",
+    api_version: str = DEFAULT_AZURE_API_VERSION,
     fields_schema: list[dict] | None = None,
 ) -> dict[str, Any]:
     """Full pipeline: web search → LLM description → validated suggestion."""
@@ -1060,7 +1065,9 @@ async def suggest_metadata(
     )
     logger.info("[ai] Calling LLM")
     raw_response = await call_llm(
-        provider_url, model, messages,
+        provider_url,
+        model,
+        messages,
         provider_type=provider_type,
         api_key=api_key,
         api_version=api_version,

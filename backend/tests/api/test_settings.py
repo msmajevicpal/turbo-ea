@@ -1,4 +1,4 @@
-﻿"""Integration tests for the /settings endpoints.
+"""Integration tests for the /settings endpoints.
 
 These tests require a PostgreSQL test database and an HTTP test client.
 """

@@ -45,7 +45,7 @@ def _get_ai_config(general: dict) -> dict:
         "provider_url": ai.get("providerUrl") or app_config.AI_PROVIDER_URL,
         "api_key": decrypt_value(encrypted_key) if encrypted_key else "",
         "model": ai.get("model") or app_config.AI_MODEL,
-        "api_version": ai.get("apiVersion", "2024-02-01"),
+        "api_version": ai.get("apiVersion", "2025-01-01"),
         "search_provider": "duckduckgo",
         "search_url": "",
         "enabled_types": ai.get("enabledTypes", []),

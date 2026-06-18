@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import MetamodelAdmin from "./MetamodelAdmin";
 
@@ -277,5 +277,40 @@ describe("MetamodelAdmin", () => {
       expect(api.get).toHaveBeenCalledWith("/metamodel/types?include_hidden=true");
       expect(api.get).toHaveBeenCalledWith("/metamodel/relation-types?include_hidden=true");
     });
+  });
+
+  it("shows an error and keeps the dialog open when creating a relation type fails", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.post).mockRejectedValueOnce(
+      new Error("A relation type from 'Application' to 'Objective' already exists."),
+    );
+    renderMetamodel();
+
+    // Open the create-relation dialog.
+    await user.click(screen.getByRole("tab", { name: /relation types/i }));
+    await user.click(await screen.findByRole("button", { name: /new relation/i }));
+    expect(await screen.findByText("Create Relation Type")).toBeInTheDocument();
+
+    // Pick source + target types. MUI renders Select as a combobox with an
+    // empty accessible name, so select by position: [source, target, cardinality].
+    const sourceSelect = screen.getAllByRole("combobox")[0];
+    await user.click(sourceSelect);
+    await user.click(await screen.findByRole("option", { name: /application/i }));
+    const targetSelect = screen.getAllByRole("combobox")[1];
+    await user.click(targetSelect);
+    await user.click(await screen.findByRole("option", { name: /objective/i }));
+
+    // Provide a valid (lowercase) key and a label so Create is enabled. Set the
+    // key directly (selecting the target auto-fills an uppercase key the mock
+    // KeyInput rejects, and the controlled fallback fights clear()+type()).
+    fireEvent.change(screen.getByTestId("key-input"), { target: { value: "owns" } });
+    await user.type(screen.getByRole("textbox", { name: /label \(verb/i }), "owns");
+
+    await user.click(screen.getByRole("button", { name: /^create$/i }));
+
+    // Error surfaces and the dialog stays open (no silent failure).
+    expect(await screen.findByText(/already exists/i)).toBeInTheDocument();
+    expect(screen.getByText("Create Relation Type")).toBeInTheDocument();
+    expect(api.post).toHaveBeenCalledTimes(1);
   });
 });

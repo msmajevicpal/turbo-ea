@@ -51,6 +51,15 @@ Diseñe sus preguntas. Cada pregunta puede ser:
 - **Fecha** — Selector de fecha
 - **Booleano** — Interruptor Sí/No
 
+### Relaciones
+
+Además de los atributos, una encuesta también puede pedir a los encuestados que mantengan actualizadas las **relaciones** de una ficha. En el paso **Campos**, la sección **Relaciones** enumera todas las relaciones posibles para el tipo de ficha objetivo, en ambas direcciones (por ejemplo, para una Aplicación: *soporta → Componente de TI* y *usado por ← Organización*). Para cada relación elegida, seleccione una acción:
+
+- **Mantener** — El encuestado ve las fichas vinculadas actualmente y puede añadir o quitar vínculos mediante un buscador.
+- **Confirmar** — El encuestado solo confirma que los vínculos actuales son correctos, o desactiva el conmutador para proponer cambios.
+
+Al aplicar dicha respuesta, Turbo EA añade los nuevos vínculos y elimina los que el encuestado quitó. El cambio se registra en el historial de la ficha igual que una edición manual de relación.
+
 ### Acciones Automáticas
 
 Configure reglas que actualicen automáticamente los atributos de las fichas en función de las respuestas de la encuesta. Por ejemplo, si un encuestado selecciona «Misión Crítica» para la criticidad de negocio, el campo `businessCriticality` de la ficha puede actualizarse automáticamente.

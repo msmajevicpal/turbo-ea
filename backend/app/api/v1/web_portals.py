@@ -9,7 +9,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.types import Text
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, get_optional_user
 from app.database import get_db
 from app.models.card import Card
 from app.models.card_type import CardType
@@ -27,6 +27,34 @@ router = APIRouter(prefix="/web-portals", tags=["web-portals"])
 
 _SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
+ACCESS_LEVELS = {"public", "authenticated", "disabled"}
+
+
+def _resolve_access_level(access_level: str | None, is_published: bool | None) -> str:
+    """Pick the authoritative access level. Prefer an explicit value; otherwise
+    map the legacy ``is_published`` flag (True → public, False → disabled)."""
+    if access_level is not None:
+        if access_level not in ACCESS_LEVELS:
+            raise HTTPException(400, f"Invalid access_level: {access_level}")
+        return access_level
+    return "public" if is_published else "disabled"
+
+
+async def _load_visible_portal(db: AsyncSession, slug: str, user: User | None) -> WebPortal:
+    """Load a portal for public consumption, enforcing its access level.
+
+    - ``disabled`` (or missing) → 404 (don't reveal existence).
+    - ``authenticated`` → requires a logged-in user (401 otherwise).
+    - ``public`` → served to anyone.
+    """
+    result = await db.execute(select(WebPortal).where(WebPortal.slug == slug))
+    portal = result.scalar_one_or_none()
+    if not portal or portal.access_level == "disabled":
+        raise HTTPException(404, "Portal not found")
+    if portal.access_level == "authenticated" and user is None:
+        raise HTTPException(401, "This portal requires you to sign in")
+    return portal
+
 
 def _portal_to_dict(p: WebPortal) -> dict:
     return {
@@ -39,6 +67,7 @@ def _portal_to_dict(p: WebPortal) -> dict:
         "display_fields": p.display_fields,
         "card_config": p.card_config,
         "is_published": p.is_published,
+        "access_level": p.access_level,
         "created_by": str(p.created_by) if p.created_by else None,
         "created_at": p.created_at.isoformat() if p.created_at else None,
         "updated_at": p.updated_at.isoformat() if p.updated_at else None,
@@ -79,6 +108,7 @@ async def create_portal(
     if not fst.scalar_one_or_none():
         raise HTTPException(400, f"Card type '{body.card_type}' not found")
 
+    access_level = _resolve_access_level(body.access_level, body.is_published)
     portal = WebPortal(
         name=body.name,
         slug=body.slug,
@@ -87,7 +117,8 @@ async def create_portal(
         filters=body.filters,
         display_fields=body.display_fields,
         card_config=body.card_config,
-        is_published=body.is_published,
+        access_level=access_level,
+        is_published=access_level != "disabled",
         created_by=user.id,
     )
     db.add(portal)
@@ -140,6 +171,14 @@ async def update_portal(
         if dup.scalar_one_or_none():
             raise HTTPException(400, "A portal with this slug already exists")
 
+    # Keep access_level (authoritative) and is_published (legacy) in sync.
+    if "access_level" in updates:
+        al = _resolve_access_level(updates["access_level"], None)
+        updates["access_level"] = al
+        updates["is_published"] = al != "disabled"
+    elif "is_published" in updates:
+        updates["access_level"] = "public" if updates["is_published"] else "disabled"
+
     for field, value in updates.items():
         setattr(portal, field, value)
 
@@ -170,13 +209,9 @@ async def delete_portal(
 async def get_public_portal(
     slug: str,
     db: AsyncSession = Depends(get_db),
+    user: User | None = Depends(get_optional_user),
 ):
-    result = await db.execute(
-        select(WebPortal).where(WebPortal.slug == slug, WebPortal.is_published == True)  # noqa: E712
-    )
-    portal = result.scalar_one_or_none()
-    if not portal:
-        raise HTTPException(404, "Portal not found")
+    portal = await _load_visible_portal(db, slug, user)
 
     # Also return the type metadata so frontend can render properly
     fst_result = await db.execute(select(CardType).where(CardType.key == portal.card_type))
@@ -305,18 +340,14 @@ async def get_public_portal_relation_options(
     slug: str,
     type_key: str = Query(...),
     db: AsyncSession = Depends(get_db),
+    user: User | None = Depends(get_optional_user),
 ):
     """Return card name/id pairs for a given type, for filter dropdowns.
 
     M-7: Only returns cards that are actually related to at least one card
     visible through the portal (matching the portal's card_type and filters).
     """
-    result = await db.execute(
-        select(WebPortal).where(WebPortal.slug == slug, WebPortal.is_published == True)  # noqa: E712
-    )
-    portal = result.scalar_one_or_none()
-    if not portal:
-        raise HTTPException(404, "Portal not found")
+    portal = await _load_visible_portal(db, slug, user)
 
     # Build a subquery for portal-visible card IDs (apply portal filters)
     visible_q = select(Card.id).where(
@@ -371,14 +402,10 @@ async def get_public_portal_cards(
     sort_by: str = Query("name"),
     sort_dir: str = Query("asc"),
     db: AsyncSession = Depends(get_db),
+    user: User | None = Depends(get_optional_user),
 ):
     """Public endpoint: returns cards for a published portal with optional filtering."""
-    result = await db.execute(
-        select(WebPortal).where(WebPortal.slug == slug, WebPortal.is_published == True)  # noqa: E712
-    )
-    portal = result.scalar_one_or_none()
-    if not portal:
-        raise HTTPException(404, "Portal not found")
+    portal = await _load_visible_portal(db, slug, user)
 
     q = select(Card).where(
         Card.type == portal.card_type,

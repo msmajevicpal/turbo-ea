@@ -4,6 +4,7 @@ import { useParams } from "react-router-dom";
 import DOMPurify from "dompurify";
 import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
+import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
 import InputAdornment from "@mui/material/InputAdornment";
 import Card from "@mui/material/Card";
@@ -75,10 +76,14 @@ function isVisible(
 }
 
 async function publicGet<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE}${path}`);
+  // `credentials` so the httpOnly auth cookie rides along — login-required
+  // portals are served to any signed-in user via get_optional_user.
+  const res = await fetch(`${BASE}${path}`, { credentials: "same-origin" });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(err.detail || res.statusText);
+    const e = new Error(err.detail || res.statusText) as Error & { status?: number };
+    e.status = res.status;
+    throw e;
   }
   return res.json();
 }
@@ -265,6 +270,7 @@ export default function PortalViewer() {
   const [loading, setLoading] = useState(true);
   const [fsLoading, setFsLoading] = useState(false);
   const [error, setError] = useState("");
+  const [authRequired, setAuthRequired] = useState(false);
   const [selectedFs, setSelectedFs] = useState<PortalCard | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -272,9 +278,14 @@ export default function PortalViewer() {
   useEffect(() => {
     if (!slug) return;
     setLoading(true);
+    setAuthRequired(false);
+    setError("");
     publicGet<PublicPortal>(`/web-portals/public/${slug}`)
       .then(setPortal)
-      .catch((err) => setError(err.message))
+      .catch((err: Error & { status?: number }) => {
+        if (err.status === 401) setAuthRequired(true);
+        else setError(err.message);
+      })
       .finally(() => setLoading(false));
   }, [slug]);
 
@@ -411,6 +422,35 @@ export default function PortalViewer() {
         }}
       >
         <CircularProgress />
+      </Box>
+    );
+  }
+
+  if (authRequired) {
+    return (
+      <Box
+        sx={{
+          display: "flex",
+          flexDirection: "column",
+          justifyContent: "center",
+          alignItems: "center",
+          minHeight: "100vh",
+          bgcolor: "background.default",
+          gap: 2,
+          px: 2,
+          textAlign: "center",
+        }}
+      >
+        <Icon name="lock" size={64} color="#bbb" />
+        <Typography variant="h5" color="text.secondary">
+          {t("portal.loginRequired")}
+        </Typography>
+        <Typography variant="body2" color="text.disabled" sx={{ maxWidth: 420 }}>
+          {t("portal.loginRequiredHint")}
+        </Typography>
+        <Button variant="contained" href="/login">
+          {t("portal.signIn")}
+        </Button>
       </Box>
     );
   }

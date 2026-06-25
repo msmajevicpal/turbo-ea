@@ -93,7 +93,9 @@ export default function WebPortalsAdmin() {
   const [slugManual, setSlugManual] = useState(false);
   const [description, setDescription] = useState("");
   const [cardType, setCardType] = useState("");
-  const [isPublished, setIsPublished] = useState(false);
+  const [accessLevel, setAccessLevel] = useState<"public" | "authenticated" | "disabled">(
+    "disabled",
+  );
   const [toggles, setToggles] = useState<Toggles>({});
   const [filterSubtypes, setFilterSubtypes] = useState<string[]>([]);
   const [filterTagIds, setFilterTagIds] = useState<string[]>([]);
@@ -125,7 +127,7 @@ export default function WebPortalsAdmin() {
     setSlugManual(false);
     setDescription("");
     setCardType("");
-    setIsPublished(false);
+    setAccessLevel("disabled");
     setToggles({});
     setFilterSubtypes([]);
     setFilterTagIds([]);
@@ -146,7 +148,7 @@ export default function WebPortalsAdmin() {
     setSlugManual(true);
     setDescription(portal.description || "");
     setCardType(portal.card_type);
-    setIsPublished(portal.is_published);
+    setAccessLevel(portal.access_level ?? (portal.is_published ? "public" : "disabled"));
     setToggles(
       (portal.card_config as Record<string, unknown>)?.toggles as Toggles || {}
     );
@@ -209,7 +211,7 @@ export default function WebPortalsAdmin() {
       slug,
       description: description || null,
       card_type: cardType,
-      is_published: isPublished,
+      access_level: accessLevel,
       display_fields: null,
       filters:
         filterSubtypes.length > 0 || filterTagIds.length > 0
@@ -246,11 +248,15 @@ export default function WebPortalsAdmin() {
     }
   };
 
+  // Effective access level of a portal (legacy rows may only carry is_published).
+  const accessOf = (portal: WebPortal): "public" | "authenticated" | "disabled" =>
+    portal.access_level ?? (portal.is_published ? "public" : "disabled");
+
   const handleTogglePublish = async (portal: WebPortal) => {
+    // Quick enable/disable; public-vs-login is chosen in the editor.
+    const next = accessOf(portal) === "disabled" ? "public" : "disabled";
     try {
-      await api.patch(`/web-portals/${portal.id}`, {
-        is_published: !portal.is_published,
-      });
+      await api.patch(`/web-portals/${portal.id}`, { access_level: next });
       load();
     } catch {
       // ignore
@@ -325,9 +331,27 @@ export default function WebPortalsAdmin() {
                   {portal.name}
                 </Typography>
                 <Chip
-                  label={portal.is_published ? t("common:status.published") : t("common:status.draft")}
+                  label={t(`webPortals.access_${accessOf(portal)}`)}
                   size="small"
-                  color={portal.is_published ? "success" : "default"}
+                  color={
+                    accessOf(portal) === "public"
+                      ? "success"
+                      : accessOf(portal) === "authenticated"
+                        ? "info"
+                        : "default"
+                  }
+                  icon={
+                    <MaterialSymbol
+                      icon={
+                        accessOf(portal) === "public"
+                          ? "public"
+                          : accessOf(portal) === "authenticated"
+                            ? "lock"
+                            : "visibility_off"
+                      }
+                      size={14}
+                    />
+                  }
                   sx={{ height: 22, fontSize: "0.7rem" }}
                 />
               </Box>
@@ -372,15 +396,19 @@ export default function WebPortalsAdmin() {
               )}
             </Box>
             <Tooltip
-              title={portal.is_published ? t("webPortals.unpublish") : t("webPortals.publish")}
+              title={
+                accessOf(portal) === "disabled"
+                  ? t("webPortals.enable")
+                  : t("webPortals.disable")
+              }
             >
               <IconButton
                 size="small"
                 onClick={() => handleTogglePublish(portal)}
-                color={portal.is_published ? "success" : "default"}
+                color={accessOf(portal) !== "disabled" ? "success" : "default"}
               >
                 <MaterialSymbol
-                  icon={portal.is_published ? "visibility" : "visibility_off"}
+                  icon={accessOf(portal) !== "disabled" ? "visibility" : "visibility_off"}
                   size={20}
                 />
               </IconButton>
@@ -771,25 +799,36 @@ export default function WebPortalsAdmin() {
 
           <Divider sx={{ my: 3 }} />
 
-          {/* ── Section: Publishing ── */}
-          <FormControlLabel
-            control={
-              <Switch
-                checked={isPublished}
-                onChange={(e) => setIsPublished(e.target.checked)}
-              />
+          {/* ── Section: Access ── */}
+          <TextField
+            select
+            fullWidth
+            label={t("webPortals.access")}
+            value={accessLevel}
+            onChange={(e) =>
+              setAccessLevel(e.target.value as "public" | "authenticated" | "disabled")
             }
-            label={
-              <Box>
-                <Typography variant="body1" fontWeight={500}>
-                  {t("webPortals.published")}
-                </Typography>
-                <Typography variant="caption" color="text.secondary">
-                  {t("webPortals.publishedHint")}
-                </Typography>
+            helperText={t(`webPortals.access_${accessLevel}_hint`)}
+          >
+            <MenuItem value="public">
+              <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                <MaterialSymbol icon="public" size={18} />
+                {t("webPortals.access_public")}
               </Box>
-            }
-          />
+            </MenuItem>
+            <MenuItem value="authenticated">
+              <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                <MaterialSymbol icon="lock" size={18} />
+                {t("webPortals.access_authenticated")}
+              </Box>
+            </MenuItem>
+            <MenuItem value="disabled">
+              <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                <MaterialSymbol icon="visibility_off" size={18} />
+                {t("webPortals.access_disabled")}
+              </Box>
+            </MenuItem>
+          </TextField>
           <FormControlLabel
             control={
               <Switch

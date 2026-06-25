@@ -19,7 +19,14 @@ class WebPortal(Base, UUIDMixin, TimestampMixin):
     filters: Mapped[dict | None] = mapped_column(JSONB, default=dict)
     display_fields: Mapped[list | None] = mapped_column(JSONB, default=list)
     card_config: Mapped[dict | None] = mapped_column(JSONB, default=dict)
+    # Legacy "is this portal live" flag — kept in sync with access_level
+    # (True when access_level != "disabled") for backward compatibility.
     is_published: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Access control: "public" (anyone), "authenticated" (any logged-in user),
+    # or "disabled" (not served). Authoritative; is_published is derived.
+    access_level: Mapped[str] = mapped_column(
+        String(20), default="disabled", server_default="disabled"
+    )
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )

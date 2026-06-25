@@ -244,3 +244,71 @@ class TestPublicPortal:
     async def test_public_portal_nonexistent_slug(self, client, db, portals_env):
         resp = await client.get("/api/v1/web-portals/public/no-such-slug")
         assert resp.status_code == 404
+
+
+class TestPortalAccessLevel:
+    async def _create(self, client, admin, slug, **extra):
+        return await client.post(
+            "/api/v1/web-portals",
+            json={"name": slug, "slug": slug, "card_type": "Application", **extra},
+            headers=auth_headers(admin),
+        )
+
+    async def test_create_authenticated_derives_is_published(self, client, db, portals_env):
+        resp = await self._create(
+            client, portals_env["admin"], "members-only", access_level="authenticated"
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["access_level"] == "authenticated"
+        # Not disabled → still "published" for legacy consumers.
+        assert data["is_published"] is True
+
+    async def test_authenticated_portal_requires_login(self, client, db, portals_env):
+        await self._create(
+            client, portals_env["admin"], "members", access_level="authenticated"
+        )
+        # Anonymous request → 401.
+        anon = await client.get("/api/v1/web-portals/public/members")
+        assert anon.status_code == 401
+        # Any signed-in user (even a viewer) → 200.
+        authed = await client.get(
+            "/api/v1/web-portals/public/members",
+            headers=auth_headers(portals_env["viewer"]),
+        )
+        assert authed.status_code == 200
+
+    async def test_disabled_portal_404_even_when_authenticated(self, client, db, portals_env):
+        admin = portals_env["admin"]
+        await self._create(client, admin, "off-portal", access_level="disabled")
+        anon = await client.get("/api/v1/web-portals/public/off-portal")
+        assert anon.status_code == 404
+        authed = await client.get(
+            "/api/v1/web-portals/public/off-portal", headers=auth_headers(admin)
+        )
+        assert authed.status_code == 404
+
+    async def test_invalid_access_level_rejected(self, client, db, portals_env):
+        resp = await self._create(
+            client, portals_env["admin"], "bad-portal", access_level="everyone"
+        )
+        assert resp.status_code == 400
+
+    async def test_update_access_level_syncs_is_published(self, client, db, portals_env):
+        admin = portals_env["admin"]
+        created = (
+            await self._create(client, admin, "sync-portal", access_level="public")
+        ).json()
+        resp = await client.patch(
+            f"/api/v1/web-portals/{created['id']}",
+            json={"access_level": "disabled"},
+            headers=auth_headers(admin),
+        )
+        assert resp.status_code == 200
+        assert resp.json()["access_level"] == "disabled"
+        assert resp.json()["is_published"] is False
+
+    async def test_legacy_is_published_maps_to_access_level(self, client, db, portals_env):
+        resp = await self._create(client, portals_env["admin"], "legacy", is_published=True)
+        assert resp.status_code == 201
+        assert resp.json()["access_level"] == "public"

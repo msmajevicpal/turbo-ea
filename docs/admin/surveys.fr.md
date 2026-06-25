@@ -51,6 +51,15 @@ Concevez vos questions. Chaque question peut être :
 - **Date** -- Sélecteur de date
 - **Booleen** -- Bascule Oui/Non
 
+### Relations
+
+Au-delà des attributs, une enquête peut aussi demander aux répondants de tenir à jour les **relations** d'une carte. À l'étape **Champs**, la section **Relations** liste toutes les relations possibles pour le type de carte cible, dans les deux sens (par exemple, pour une Application : *prend en charge → Composant informatique* et *utilisé par ← Organisation*). Pour chaque relation choisie, sélectionnez une action :
+
+- **Maintenir** — Le répondant voit les cartes actuellement liées et peut ajouter ou retirer des liens à l'aide d'un sélecteur de recherche.
+- **Confirmer** — Le répondant confirme simplement que les liens actuels sont corrects, ou désactive le commutateur pour proposer des changements.
+
+Lorsque vous appliquez une telle réponse, Turbo EA ajoute les nouveaux liens et supprime ceux que le répondant a retirés. La modification est enregistrée dans l'historique de la carte comme une modification manuelle de relation.
+
 ### Actions automatiques
 
 Configurez des règles qui mettent automatiquement à jour les attributs des fiches en fonction des réponses à l'enquête. Par exemple, si un répondant sélectionne « Mission critique » pour la criticité métier, le champ `businessCriticality` de la fiche peut être mis à jour automatiquement.

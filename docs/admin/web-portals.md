@@ -1,6 +1,6 @@
 # Web Portals
 
-The **Web Portals** feature (**Admin > Settings > Web Portals**) lets you create **public, read-only views** of selected card data — accessible without authentication via a unique URL.
+The **Web Portals** feature (**Admin > Settings > Web Portals**) lets you create **read-only views** of selected card data, shared via a unique URL. Each portal can be made fully public, restricted to signed-in users, or disabled (see [Portal Access](#portal-access)).
 
 ![Web Portals Administration](../assets/img/en/30_admin_settings_web_portals.png)
 
@@ -51,7 +51,17 @@ Portals are accessed at:
 https://your-turbo-ea-domain/portal/{slug}
 ```
 
-No login is required. Visitors can browse the card list, search, and view card details — but only the properties you've enabled are shown.
+Each portal has an **Access** level, chosen in the portal editor:
+
+| Access | Who can view |
+|--------|--------------|
+| **Public** | Anyone with the link — no login required. |
+| **Login required** | Only signed-in Turbo EA users. Visitors who are not signed in see a sign-in prompt. |
+| **Disabled** | No one — the portal is not served (returns *not found*). |
+
+The portal list also has a quick **enable / disable** button (the eye icon) that flips between the chosen access level and Disabled; choose Public vs Login required in the editor.
+
+Within a portal, visitors can browse the card list, search, and view card details — but only the properties you've enabled are shown.
 
 !!! note
     Portals are read-only. Visitors cannot edit, comment, or interact with cards. Sensitive data (stakeholders, comments, history) is never exposed on portals.

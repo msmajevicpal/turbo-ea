@@ -5,6 +5,31 @@ All notable changes to Turbo EA are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.49.0] - 2026-06-25
+
+### Added
+- **Tags can have a description.** Admin → Metamodel → Tags: each tag now has an optional description (tag groups already had one), shown as a tooltip in the admin and carried through workspace export/import.
+- **Web portals support a "Login required" access level.** A portal's access is now a three-way choice — **Public** (anyone with the link), **Login required** (only signed-in users), or **Disabled** (not served) — replacing the old published/unpublished toggle. Visiting a login-required portal while signed out shows a sign-in prompt; signed-in users see it normally. Existing published portals become Public and unpublished ones become Disabled automatically.
+
+### Changed
+- **Web portal admin: the publish toggle is now an access-level selector.** The portal list still has a quick enable/disable button; Public vs Login required is chosen in the editor.
+
+## [1.48.0] - 2026-06-25
+
+### Added
+- **Layered Dependency View is now interactive.** The dependency diagram (Dependencies report, the card-detail dependency section, and TurboLens Architect) gained a toolbar: drag cards to rearrange them within their layer — and drag a whole **layer box** to move it with all its cards — with **Reset layout** to restore the automatic arrangement, plus **Fullscreen**, **Export** to PNG or SVG, and a canvas **background** that cycles between grid, dots, and none.
+- **Configurable card appearance in the dependency view.** A new **Card display** menu lets you toggle the type label and a lifecycle-status dot, and pick extra attribute fields to show directly on each card — the first two render on the card and the full set appears in the hover tooltip. Choices are remembered between visits.
+- **Show parent hierarchy in the dependency view.** A new toggle adds each card's parent card to the diagram and draws the *contains / part of* containment link, so hierarchical context (e.g. a parent Organization) is visible alongside the relationship graph.
+- **Card-type icons in the dependency view.** Each card in the Layered Dependency View now shows its metamodel icon in the top-left corner, making card types recognisable at a glance.
+- **Stakeholder roles count toward data quality.** Admin → Metamodel → a card type's **Data quality** panel has a new **Stakeholder roles** contributor alongside Description, Lifecycle, Relations and Tags. Each stakeholder role defined for the type is a completeness slot that's satisfied once someone is assigned to it. Like the other built-in factors it counts at *Normal* weight by default (only for types that actually define roles); set it to *Ignore* to exclude it.
+
+### Changed
+- **Dependency view background is cleaner by default.** The canvas now shows a faint line grid instead of the previous dotted pattern, and can be switched off entirely.
+
+## [1.47.0] - 2026-06-25
+
+### Added
+- **Surveys can now ask respondents to maintain relationships, not just attributes.** When building a survey, the Fields step has a new **Relations** section listing every relationship the target card type can have (in both directions). Pick any to have respondents review the linked cards — set each to **Maintain** (edit the linked set: add or remove cards via a search picker) or **Confirm** (acknowledge the current links are correct). Applying a response syncs the relations on the card, recorded in its history like a normal relation change.
 ## [1.47.0] - 2026-06-25
 
 ### Added

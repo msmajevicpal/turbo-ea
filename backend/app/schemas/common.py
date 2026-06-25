@@ -114,6 +114,7 @@ class TagGroupCreate(BaseModel):
 
 class TagCreate(BaseModel):
     name: str
+    description: str | None = None
     color: str | None = None
 
 
@@ -127,6 +128,7 @@ class TagGroupUpdate(BaseModel):
 
 class TagUpdate(BaseModel):
     name: str | None = None
+    description: str | None = None
     color: str | None = None
 
 
@@ -221,6 +223,9 @@ class WebPortalCreate(BaseModel):
     display_fields: list | None = None
     card_config: dict | None = None
     is_published: bool = False
+    # "public" | "authenticated" | "disabled". Falls back from is_published
+    # when omitted (legacy clients).
+    access_level: str | None = None
 
 
 class WebPortalUpdate(BaseModel):
@@ -232,6 +237,7 @@ class WebPortalUpdate(BaseModel):
     display_fields: list | None = None
     card_config: dict | None = None
     is_published: bool | None = None
+    access_level: str | None = None
 
 
 class SavedReportCreate(BaseModel):
